@@ -1,0 +1,83 @@
+# ─── Nginx Ingress Controller ─────────────────────────────────────────────────
+# This routes external traffic → frontend or backend based on path.
+# 
+# Install ingress-nginx first (free, one-time):
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/cloud/deploy.yaml
+#
+# For k3s (Oracle Cloud free), use:
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/baremetal/deploy.yaml
+#
+# For cert-manager (free TLS via Let's Encrypt), install separately:
+#   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.yaml
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: lms-ingress
+  namespace: lms
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # WebSocket support for live sessions
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+    # Uncomment below once cert-manager is installed and domain is set:
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  # Uncomment TLS once domain + cert-manager are configured:
+  # tls:
+  #   - hosts:
+  #       - your-domain.com
+  #     secretName: lms-tls
+  rules:
+    - host: your-domain.com    # ← Replace with your actual domain or server IP
+      http:
+        paths:
+          # API routes → backend
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port: {number: 8080}
+          # WebSocket for live sessions
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port: {number: 8080}
+          # Keycloak auth
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port: {number: 8080}
+          # All other routes → React SPA
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port: {number: 80}
+---
+# ─── Let's Encrypt ClusterIssuer (free TLS) ──────────────────────────────────
+# Uncomment this once cert-manager is installed
+# apiVersion: cert-manager.io/v1
+# kind: ClusterIssuer
+# metadata:
+#   name: letsencrypt-prod
+# spec:
+#   acme:
+#     server: https://acme-v02.api.letsencrypt.org/directory
+#     email: your-email@gmail.com   # ← Your email for cert notifications
+#     privateKeySecretRef:
+#       name: letsencrypt-prod
+#     solvers:
+#       - http01:
+#           ingress:
+#             class: nginx

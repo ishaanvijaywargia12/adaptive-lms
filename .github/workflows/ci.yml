@@ -1,0 +1,80 @@
+name: CI — Build & Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ─── Frontend: Type-check + Build ───────────────────────────────────────────
+  frontend:
+    name: Frontend (React + Vite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      - name: Build production bundle
+        run: npm run build
+        env:
+          # Placeholder values so Vite does not fail on missing env vars during CI
+          VITE_API_URL: http://localhost/api
+          VITE_KEYCLOAK_URL: http://localhost:8180
+          VITE_KEYCLOAK_REALM: lms-demo
+          VITE_KEYCLOAK_CLIENT_ID: lms-frontend
+          VITE_WS_URL: ws://localhost/ws
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 1
+
+  # ─── Backend: Compile + Test ─────────────────────────────────────────────────
+  backend:
+    name: Backend (Spring Boot + Maven)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: "maven"
+
+      - name: Compile & package (skip tests — integration tests need live infra)
+        run: mvn -B clean package -DskipTests -q
+
+      - name: Report any compiler warnings
+        run: mvn -B compile 2>&1 | grep -i "warning:" || echo "No compiler warnings"
+
+      - name: Upload jar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: backend/target/adaptive-lms-backend-*.jar
+          retention-days: 1

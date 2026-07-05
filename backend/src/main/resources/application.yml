@@ -1,0 +1,258 @@
+spring:
+  application:
+    name: adaptive-lms-backend
+
+  # ─── DataSource (set per profile) ─────────────────────────────────────────
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/lmsdb}
+    username: ${SPRING_DATASOURCE_USERNAME:lmsuser}
+    password: ${SPRING_DATASOURCE_PASSWORD:lmspassword}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: LmsHikariPool
+
+  # ─── JPA ──────────────────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        multiTenancy: SCHEMA
+        format_sql: true
+        default_batch_fetch_size: 25
+
+  # ─── Flyway ───────────────────────────────────────────────────────────────
+  flyway:
+    enabled: false  # We manage Flyway programmatically per-tenant
+
+  # ─── Redis ────────────────────────────────────────────────────────────────
+  data:
+    redis:
+      host: ${SPRING_REDIS_HOST:localhost}
+      port: 6379
+      password: ${SPRING_REDIS_PASSWORD:redispassword}
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+    elasticsearch:
+      repositories:
+        enabled: true
+
+  # ─── Kafka ────────────────────────────────────────────────────────────────
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: lms-consumer-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.lms.kafka.event"
+
+  # ─── Mail ─────────────────────────────────────────────────────────────────
+  mail:
+    host: ${SPRING_MAIL_HOST:mailhog}
+    port: ${SPRING_MAIL_PORT:1025}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: false
+      mail.smtp.starttls.enable: false
+
+  # ─── Security / OAuth2 ────────────────────────────────────────────────────
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:8180}/realms/{tenant}
+          # We override this per-tenant in JwtDecoder bean
+
+  # ─── Cache ────────────────────────────────────────────────────────────────
+  cache:
+    type: redis
+    redis:
+      time-to-live: 3600000  # 1 hour default TTL
+
+  # ─── Batch ────────────────────────────────────────────────────────────────
+  batch:
+    job:
+      enabled: false  # Jobs are triggered manually / via scheduler
+    jdbc:
+      initialize-schema: always
+
+# ─── Server ──────────────────────────────────────────────────────────────────
+server:
+  port: 8080
+  compression:
+    enabled: true
+    mime-types: application/json,text/plain,application/xml
+  servlet:
+    context-path: /
+
+# ─── Elasticsearch ───────────────────────────────────────────────────────────
+spring.elasticsearch.uris: ${ELASTICSEARCH_URI:http://localhost:9200}
+spring.elasticsearch.connection-timeout: 5000
+spring.elasticsearch.socket-timeout: 30000
+
+# ─── MinIO ───────────────────────────────────────────────────────────────────
+minio:
+  url: ${MINIO_URL:http://localhost:9000}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin123}
+  buckets:
+    public: lms-public
+    content: lms-content
+    submissions: lms-submissions
+    certificates: lms-certificates
+
+# ─── Keycloak Admin ──────────────────────────────────────────────────────────
+keycloak:
+  auth-server-url: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:8180}
+  admin:
+    username: ${KEYCLOAK_ADMIN_USERNAME:admin}
+    password: ${KEYCLOAK_ADMIN_PASSWORD:admin123}
+    client-id: admin-cli
+    realm: master
+
+# ─── Gemini / LangChain4j ────────────────────────────────────────────────────
+gemini:
+  api-key: ${GEMINI_API_KEY:}
+
+# ─── Qdrant Vector Database ────────────────────────────────────────────────
+qdrant:
+  host: ${QDRANT_HOST:localhost}
+  port: ${QDRANT_PORT:6334}       # gRPC port (REST is 6333 — only used for health checks)
+  collection:
+    vector-size: 384             # AllMiniLmL6V2 output dimensionality (384 dims)
+
+# ─── RAG Pipeline Settings ───────────────────────────────────────────────
+rag:
+  chunk-size: 1000               # Characters per chunk (sliding window)
+  chunk-overlap: 200             # Overlap between adjacent chunks
+  top-k: 5                       # Top-K Qdrant results injected as LLM context
+  cache-ttl-hours: 24            # Redis answer cache TTL
+
+# ─── App Config ──────────────────────────────────────────────────────────
+app:
+  base-url: ${APP_BASE_URL:http://localhost}
+  plagiarism-threshold: ${APP_PLAGIARISM_THRESHOLD:70}
+  mail:
+    from: ${MAIL_FROM:noreply@lms.com}
+  file-limits:
+    video-max-mb: 500
+    pdf-max-mb: 20
+    image-max-mb: 5
+
+# ─── OpenAPI ─────────────────────────────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+# ─── Logging ─────────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.lms: INFO
+    org.hibernate.SQL: WARN
+    org.apache.kafka: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{tenantId}] [%X{userId}] %logger{36} - %msg%n"
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    url: jdbc:postgresql://localhost:5432/lmsdb
+  jpa:
+    show-sql: true
+  mail:
+    host: localhost
+    port: 1025
+
+logging:
+  level:
+    com.lms: DEBUG
+    org.hibernate.SQL: DEBUG
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka:29092}
+  data:
+    redis:
+      host: ${SPRING_REDIS_HOST:redis}
+
+qdrant:
+  host: ${QDRANT_HOST:qdrant}    # Docker service name
+  port: 6334
+
+logging:
+  level:
+    com.lms: INFO
+
+---
+spring:
+  config:
+    activate:
+      on-profile: render
+  # Neon.tech free PostgreSQL — connection string from env var
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    hikari:
+      maximum-pool-size: 5   # Neon free tier connection limit
+      minimum-idle: 1
+  # Upstash Kafka (SASL_SSL) — connection string from env var
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS}
+    properties:
+      security.protocol: SASL_SSL
+      sasl.mechanism: SCRAM-SHA-256
+      sasl.jaas.config: ${SPRING_KAFKA_PROPERTIES_SASL_JAAS_CONFIG}
+  # Upstash Redis — URL-based connection (Upstash provides a full rediss:// URL)
+  data:
+    redis:
+      url: ${SPRING_DATA_REDIS_URL}
+
+# Disable services not available on free-tier cloud hosting
+# These features (RAG/vector search, file uploads) gracefully degrade
+qdrant:
+  host: disabled
+  port: 0
+
+minio:
+  url: ${MINIO_URL:disabled}
+  access-key: disabled
+  secret-key: disabled
+
+logging:
+  level:
+    com.lms: INFO
+    org.apache.kafka: ERROR

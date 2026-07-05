@@ -1,0 +1,53 @@
+# ─── Node / Frontend ──────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+
+# ─── Java / Maven / Backend ───────────────────────────────────────────────────
+backend/target/
+backend/.mvn/timing.properties
+backend/apache-maven-*/
+backend/apache-maven-*.tar.gz
+backend/*.tar.gz
+backend/jdk*/
+backend/jdk*.tar.gz
+*.class
+*.jar
+*.war
+
+# ─── Dev scratch / debug files ────────────────────────────────────────────────
+backend/Test.java
+backend/Test.class
+backend/lombok.jar
+backend/lombok.config.bak
+backend/*.log
+backend/compile*.log
+backend/compiler*.log
+backend/mvn_debug*.log
+backend/mvn_ext*.log
+backend/cp.txt
+
+# ─── Secrets & Environment Files ─────────────────────────────────────────────
+infra/.env
+infra/.env.*
+*.env
+!*.env.example
+
+# ─── IDE / Editor ─────────────────────────────────────────────────────────────
+.idea/
+*.iml
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ─── Docker Volumes / Generated ───────────────────────────────────────────────
+infra/volumes/
+*.log
+
+# ─── Kubernetes secrets ───────────────────────────────────────────────────────
+k8s/secrets-*.yaml
+k8s/values-*.yaml
+

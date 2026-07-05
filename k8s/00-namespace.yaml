@@ -1,0 +1,7 @@
+# ─── Namespace ────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lms
+  labels:
+    app.kubernetes.io/name: adaptive-lms

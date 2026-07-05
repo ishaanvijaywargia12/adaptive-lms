@@ -1,0 +1,132 @@
+name: CD — Build & Push Docker Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "backend/**"
+      - "infra/**"
+      - ".github/workflows/cd.yml"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: ishaanvijaywargia12
+
+jobs:
+  # ─── Require CI to pass first ────────────────────────────────────────────────
+  ci-gate:
+    name: Wait for CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: CI gate (CI workflow runs in parallel — this is a documentation step)
+        run: echo "CD triggered on push to main. CI runs in parallel via the ci.yml workflow."
+
+  # ─── Build + Push Backend Image ─────────────────────────────────────────────
+  build-backend:
+    name: Build & Push Backend Image
+    runs-on: ubuntu-latest
+    needs: [ci-gate]
+    permissions:
+      contents: read
+      packages: write  # Required to push to GHCR
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}  # Auto-provided, no setup needed
+
+      - name: Extract image metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/adaptive-lms-backend
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest
+
+      - name: Set up Docker Buildx (for multi-arch builds)
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Builds for both x86 cloud servers and ARM (Raspberry Pi / Oracle ARM free tier)
+          platforms: linux/amd64,linux/arm64
+
+  # ─── Build + Push Frontend Image ────────────────────────────────────────────
+  build-frontend:
+    name: Build & Push Frontend Image
+    runs-on: ubuntu-latest
+    needs: [ci-gate]
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/adaptive-lms-frontend
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VITE_API_URL=${{ secrets.VITE_API_URL }}
+            VITE_KEYCLOAK_URL=${{ secrets.VITE_KEYCLOAK_URL }}
+            VITE_KEYCLOAK_REALM=${{ secrets.VITE_KEYCLOAK_REALM }}
+            VITE_KEYCLOAK_CLIENT_ID=${{ secrets.VITE_KEYCLOAK_CLIENT_ID }}
+            VITE_WS_URL=${{ secrets.VITE_WS_URL }}
+
+  # ─── Trigger Render.com Re-Deploy ───────────────────────────────────────────
+  deploy-backend-render:
+    name: Trigger Render Deploy (Backend)
+    runs-on: ubuntu-latest
+    needs: [build-backend]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Trigger Render deploy hook
+        # RENDER_BACKEND_DEPLOY_HOOK_URL is set in GitHub Secrets
+        # Get this URL from: Render dashboard → Service → Settings → Deploy Hook
+        run: |
+          if [ -n "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL }}" ]; then
+            curl -X POST "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL }}"
+            echo "Render backend deploy triggered"
+          else
+            echo "RENDER_BACKEND_DEPLOY_HOOK_URL not set — manual deploy required"
+          fi

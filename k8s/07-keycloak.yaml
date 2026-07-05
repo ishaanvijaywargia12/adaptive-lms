@@ -1,0 +1,71 @@
+# ─── Keycloak ─────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: lms
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: keycloak}
+  template:
+    metadata:
+      labels: {app: keycloak}
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:23.0
+          command: ["start-dev", "--import-realm"]
+          ports:
+            - containerPort: 8080
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: jdbc:postgresql://postgres:5432/lmsdb
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: POSTGRES_USER}
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: POSTGRES_PASSWORD}
+            - name: KC_DB_SCHEMA
+              value: keycloak
+            - name: KEYCLOAK_ADMIN
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: KEYCLOAK_ADMIN}
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: KEYCLOAK_ADMIN_PASSWORD}
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            - name: KC_HTTP_ENABLED
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 10
+          resources:
+            requests: {cpu: "200m", memory: "512Mi"}
+            limits: {cpu: "1000m", memory: "1Gi"}
+          volumeMounts:
+            - name: realm-config
+              mountPath: /opt/keycloak/data/import
+      volumes:
+        - name: realm-config
+          configMap:
+            name: keycloak-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: lms
+spec:
+  selector: {app: keycloak}
+  ports:
+    - port: 8080
+      targetPort: 8080

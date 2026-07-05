@@ -1,0 +1,102 @@
+# ─── Spring Boot Backend ──────────────────────────────────────────────────────
+# Images are pushed to GHCR by the CD workflow.
+# Replace GITHUB_USERNAME with your actual GitHub username.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: lms
+  labels:
+    app: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: backend}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0    # Zero-downtime deploys
+      maxSurge: 1
+  template:
+    metadata:
+      labels: {app: backend}
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/GITHUB_USERNAME/adaptive-lms-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/lmsdb
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: POSTGRES_USER}
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: POSTGRES_PASSWORD}
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:29092
+            - name: SPRING_REDIS_HOST
+              value: redis
+            - name: SPRING_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: REDIS_PASSWORD}
+            - name: MINIO_URL
+              value: http://minio:9000
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: MINIO_ROOT_USER}
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: MINIO_ROOT_PASSWORD}
+            - name: ELASTICSEARCH_URI
+              value: http://elasticsearch:9200
+            - name: KEYCLOAK_AUTH_SERVER_URL
+              value: http://keycloak:8080
+            - name: KEYCLOAK_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: KEYCLOAK_ADMIN}
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: KEYCLOAK_ADMIN_PASSWORD}
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: GEMINI_API_KEY}
+            - name: QDRANT_HOST
+              value: qdrant
+            - name: QDRANT_PORT
+              value: "6334"
+            - name: APP_BASE_URL
+              valueFrom:
+                secretKeyRef: {name: lms-secrets, key: APP_BASE_URL}
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 15
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          resources:
+            requests: {cpu: "300m", memory: "768Mi"}
+            limits: {cpu: "1500m", memory: "1.5Gi"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: lms
+spec:
+  selector: {app: backend}
+  ports:
+    - port: 8080
+      targetPort: 8080
