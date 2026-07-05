@@ -41,6 +41,7 @@ jobs:
         run: npm run build
         working-directory: frontend
         env:
+          VITE_BASE_PATH: /adaptive-lms/
           # These are set as GitHub Actions Secrets:
           # Settings → Secrets and variables → Actions → New repository secret
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
