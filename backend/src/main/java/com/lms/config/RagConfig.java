@@ -68,6 +68,14 @@ public class RagConfig {
      */
     @Bean
     public EmbeddingModel embeddingModel() {
+        if ("disabled".equalsIgnoreCase(qdrantHost) || qdrantHost == null || qdrantHost.isBlank()) {
+            log.warn("[RAG] Qdrant is disabled — skipping AllMiniLmL6V2 local embedding model to save RAM.");
+            return textSegments -> dev.langchain4j.model.output.Response.from(
+                    textSegments.stream()
+                            .map(ts -> dev.langchain4j.data.embedding.Embedding.from(new float[vectorSize]))
+                            .toList()
+            );
+        }
         log.info("[RAG] Loading AllMiniLmL6V2 local embedding model (384 dims)...");
         return new AllMiniLmL6V2EmbeddingModel();
     }

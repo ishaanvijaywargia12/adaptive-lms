@@ -73,6 +73,8 @@ public class DataSeeder implements InitializingBean {
 
             tenantRepository.save(tenant);
             log.info("[SEEDER] Created tenant subdomain='{}' schema='{}'", defaultTenantSlug, schemaName);
+            
+            flywayMigrationRunner.migrateTenantSchema(schemaName);
             return tenant;
         });
     }
