@@ -44,6 +44,15 @@ public class TenantFilter extends OncePerRequestFilter {
     private String defaultTenantSlug;
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return path.startsWith("/actuator") ||
+               path.startsWith("/swagger-ui") ||
+               path.startsWith("/v3/api-docs") ||
+               path.startsWith("/favicon.ico");
+    }
+
+    @Override
     protected void doFilterInternal(
             @NonNull HttpServletRequest request,
             @NonNull HttpServletResponse response,
@@ -96,10 +105,15 @@ public class TenantFilter extends OncePerRequestFilter {
         // 2. Subdomain from Host header
         String host = request.getServerName();
         if (host != null) {
-            String[] parts = host.split("\\.");
-            if (parts.length >= 3) {
-                // host = "demo.lms.com" → slug = "demo"
-                return parts[0].toLowerCase();
+            if (host.endsWith(".onrender.com")) {
+                // Ignore the onrender.com base domain so it falls through to the default tenant
+                log.trace("Ignoring onrender.com host for tenant resolution: {}", host);
+            } else {
+                String[] parts = host.split("\\.");
+                if (parts.length >= 3) {
+                    // host = "demo.lms.com" → slug = "demo"
+                    return parts[0].toLowerCase();
+                }
             }
         }
 
