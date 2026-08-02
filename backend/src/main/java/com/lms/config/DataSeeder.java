@@ -7,101 +7,118 @@ import com.lms.tenant.TenantContext;
 import com.lms.tenant.TenantRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Seeds default tenant and admin user for demo/dev environments.
+ * Seeds the default demo tenant and demo users on startup.
  *
- * <p>Runs at startup, AFTER {@link FlywayMigrationRunner} (Order=2 vs Order=1).
- * Idempotent — skips if tenant/user already exist.
+ * <p><strong>Ordering:</strong> {@code @Order(2)} runs after {@link FlywayMigrationRunner}
+ * ({@code @Order(1)}). Both implement {@link InitializingBean}.
  *
- * <p>In production, tenants are created through the admin API, not seeded.
+ * <p><strong>Transaction safety:</strong> This class does NOT use a class-level
+ * {@code @Transactional} because it switches {@code TenantContext} mid-execution.
+ * Each database operation is wrapped in its own {@link TransactionTemplate} call
+ * that opens a fresh connection AFTER setting the tenant schema, ensuring Hibernate
+ * binds the correct schema for that session.
+ *
+ * <p>Idempotent — skips if data already exists.
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
-public class DataSeeder {
+@Order(2)
+public class DataSeeder implements InitializingBean {
 
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
     private final FlywayMigrationRunner flywayMigrationRunner;
+    private final TransactionTemplate transactionTemplate;
 
     @Value("${lms.tenant.default-slug:demo}")
     private String defaultTenantSlug;
 
-    @Value("${lms.demo.admin-email:admin@lms.demo}")
-    private String adminEmail;
-
-    @Value("${lms.demo.admin-keycloak-id:demo-admin-id}")
-    private String adminKeycloakId;
-
-    @EventListener(ApplicationReadyEvent.class)
-    @Order(2)
-    @Transactional
-    public void seed() {
+    @Override
+    public void afterPropertiesSet() {
         log.info("[SEEDER] Starting idempotent seed...");
         Tenant tenant = seedDemoTenant();
         if (tenant != null) {
-            seedDemoAdmin(tenant);
+            seedDemoUsers(tenant);
         }
         log.info("[SEEDER] Seed complete.");
     }
 
+    // ─── Tenant ───────────────────────────────────────────────────────────────
+
     private Tenant seedDemoTenant() {
-        if (tenantRepository.existsBySubdomain(defaultTenantSlug)) {
-            log.info("[SEEDER] Tenant '{}' already exists. Skipping.", defaultTenantSlug);
-            return tenantRepository.findBySubdomain(defaultTenantSlug).orElse(null);
-        }
-
-        String schemaName = "tenant_" + defaultTenantSlug;
-
-        Tenant tenant = Tenant.builder()
-                .name("Demo LMS")
-                .subdomain(defaultTenantSlug)          // slug only — e.g. "demo", not "demo.lms.local"
-                .realmName("lms-demo")
-                .schemaName(schemaName)
-                .active(true)
-                .build();
-
-        tenantRepository.save(tenant);
-        log.info("[SEEDER] Created tenant subdomain='{}' schema='{}'", defaultTenantSlug, schemaName);
-
-        // Run V2 migrations for this new tenant schema
-        try {
-            flywayMigrationRunner.migrateTenantSchema(schemaName);
-        } catch (Exception e) {
-            log.error("[SEEDER] Failed to migrate tenant schema '{}': {}", schemaName, e.getMessage());
-        }
-
-        return tenant;
-    }
-
-    private void seedDemoAdmin(Tenant tenant) {
-        TenantContext.setCurrentTenant(tenant.getSchemaName());
-        try {
-            if (userRepository.existsByEmail(adminEmail)) {
-                log.info("[SEEDER] Admin user '{}' already exists. Skipping.", adminEmail);
-                return;
+        // Check + create in a single transaction (public schema — no tenant context needed)
+        return transactionTemplate.execute(status -> {
+            if (tenantRepository.existsBySubdomain(defaultTenantSlug)) {
+                log.info("[SEEDER] Tenant '{}' already exists. Skipping.", defaultTenantSlug);
+                return tenantRepository.findBySubdomain(defaultTenantSlug).orElse(null);
             }
 
-            User admin = User.builder()
-                    .keycloakId(adminKeycloakId)
-                    .email(adminEmail)
-                    .firstName("LMS")
-                    .lastName("Admin")
-                    .role(User.UserRole.ADMIN)
+            String schemaName = "tenant_" + defaultTenantSlug;
+            Tenant tenant = Tenant.builder()
+                    .name("Demo LMS")
+                    .subdomain(defaultTenantSlug)
+                    .realmName("lms-demo")
+                    .schemaName(schemaName)
                     .active(true)
                     .build();
 
-            userRepository.save(admin);
-            log.info("[SEEDER] Created demo admin user email='{}'", adminEmail);
+            tenantRepository.save(tenant);
+            log.info("[SEEDER] Created tenant subdomain='{}' schema='{}'", defaultTenantSlug, schemaName);
+            return tenant;
+        });
+    }
+
+    // ─── Users ────────────────────────────────────────────────────────────────
+
+    /**
+     * Seeds demo users in the tenant schema.
+     * Each call sets TenantContext BEFORE opening a transaction so Hibernate
+     * routes to the correct schema. Context is always cleared in finally.
+     */
+    private void seedDemoUsers(Tenant tenant) {
+        String schemaName = tenant.getSchemaName();
+
+        seedUser(schemaName, "student@demo.com",    "Demo",  "Student",    User.UserRole.STUDENT);
+        seedUser(schemaName, "instructor@demo.com", "Demo",  "Instructor", User.UserRole.INSTRUCTOR);
+        seedUser(schemaName, "admin@demo.com",      "LMS",   "Admin",      User.UserRole.ADMIN);
+    }
+
+    private void seedUser(String schemaName, String email,
+                          String firstName, String lastName, User.UserRole role) {
+        TenantContext.setCurrentTenant(schemaName);
+        try {
+            transactionTemplate.execute(status -> {
+                if (userRepository.existsByEmail(email)) {
+                    log.debug("[SEEDER] User '{}' already exists.", email);
+                    return null;
+                }
+
+                // keycloakId is intentionally null — it is filled on first login
+                // by CurrentUserService.resolveOrProvision().
+                User user = User.builder()
+                        .keycloakId(null)
+                        .email(email)
+                        .firstName(firstName)
+                        .lastName(lastName)
+                        .role(role)
+                        .active(true)
+                        .build();
+
+                userRepository.save(user);
+                log.info("[SEEDER] Created demo user email='{}' role={}", email, role);
+                return null;
+            });
         } catch (Exception e) {
-            log.warn("[SEEDER] Could not seed admin user: {}", e.getMessage());
+            log.warn("[SEEDER] Could not seed user '{}': {}", email, e.getMessage());
         } finally {
             TenantContext.clear();
         }

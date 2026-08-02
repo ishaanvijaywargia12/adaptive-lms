@@ -109,9 +109,12 @@ public class RagConfig {
      */
     @Bean
     public QdrantClient qdrantClient() throws Exception {
-        if ("disabled".equals(qdrantHost)) {
-            log.warn("[QDRANT] qdrant.host=disabled — RAG vector search is disabled in this profile.");
-            return null; // Components consuming QdrantClient must handle null gracefully
+        if ("disabled".equals(qdrantHost) || qdrantHost == null || qdrantHost.isBlank()) {
+            log.warn("[QDRANT] qdrant.host=disabled — RAG vector search is disabled in this profile. " +
+                     "Returning a disconnected client; RAG endpoints will return an error message.");
+            // Point at localhost — will fail when used. Callers must handle gracefully.
+            // We do NOT return null to avoid NullPointerExceptions in @Autowired fields.
+            return new QdrantClient(QdrantGrpcClient.newBuilder("localhost", 6334, false).build());
         }
 
         log.info("[QDRANT] Connecting to {}:{} tls={}", qdrantHost, qdrantPort, qdrantUseTls);

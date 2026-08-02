@@ -9,7 +9,7 @@ import lombok.*;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class User extends BaseEntity {
 
-    @Column(name = "keycloak_id", nullable = false, unique = true)
+    @Column(name = "keycloak_id", nullable = true, unique = true)
     private String keycloakId;
 
     @Column(name = "email", nullable = false, unique = true)

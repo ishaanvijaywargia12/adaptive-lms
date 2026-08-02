@@ -57,15 +57,22 @@ public class MinioStorageService {
      * Get presigned GET URL for downloading/streaming content.
      */
     public String getPresignedDownloadUrl(String bucket, String objectKey) {
+        return generatePresignedUrl(bucket, objectKey, 900); // 15 minutes
+    }
+
+    /**
+     * Generate a presigned GET URL with a specific expiry (in seconds).
+     */
+    public String generatePresignedUrl(String bucket, String objectKey, int expirySeconds) {
         try {
             return minioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
                     .method(Method.GET)
                     .bucket(bucket)
                     .object(objectKey)
-                    .expiry(15, TimeUnit.MINUTES)
+                    .expiry(expirySeconds, TimeUnit.SECONDS)
                     .build());
         } catch (Exception e) {
-            log.error("Failed to generate download URL for {}/{}: {}", bucket, objectKey, e.getMessage());
+            log.error("Failed to generate presigned URL for {}/{}: {}", bucket, objectKey, e.getMessage());
             throw new RuntimeException("Could not generate download URL", e);
         }
     }

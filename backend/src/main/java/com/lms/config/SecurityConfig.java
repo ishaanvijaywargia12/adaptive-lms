@@ -3,58 +3,68 @@ package com.lms.config;
 import com.lms.security.JwtAuthenticationConverter;
 import com.lms.tenant.TenantFilter;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
 import java.util.List;
 
+/**
+ * API security configuration (Order = 2 — runs after auth-server chain at Order = 1).
+ *
+ * <p>Configured as a stateless OAuth2 resource server that validates JWTs issued
+ * by the Spring Authorization Server running in the same process at {@code /oauth2/...}.
+ *
+ * <p>The {@link JwtDecoder} bean is defined in {@link AuthServerConfig} so that
+ * the same RSA key is used for both signing and validation.
+ */
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity(prePostEnabled = true)
 @RequiredArgsConstructor
+@Slf4j
 public class SecurityConfig {
 
     private final JwtAuthenticationConverter jwtAuthenticationConverter;
     private final TenantFilter tenantFilter;
 
-    @Value("${keycloak.auth-server-url}")
-    private String keycloakUrl;
+    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:5173,https://ishaanvijaywargia12.github.io}")
+    private String allowedOriginsRaw;
 
     /**
-     * Comma-separated list of allowed CORS origins.
-     * Set CORS_ALLOWED_ORIGINS env var in production.
-     * Defaults to localhost (dev) + GitHub Pages (demo).
+     * API security filter chain — stateless, JWT resource server.
+     * This is Order 2; the auth server chain (Order 1) handles /oauth2/**, /login, /logout.
      */
-    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:5173,https://ishaanvijaywargia12.github.io}")
-    private List<String> allowedOrigins;
-
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    @Order(2)
+    public SecurityFilterChain apiFilterChain(HttpSecurity http) throws Exception {
         http
             .csrf(AbstractHttpConfigurer::disable)
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                // Public endpoints
+                // Auth server own endpoints (covered by Order-1 chain, but permit here too)
+                .requestMatchers("/oauth2/**", "/login", "/logout", "/.well-known/**").permitAll()
+                // Public API endpoints
                 .requestMatchers("/public/**").permitAll()
-                .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                .requestMatchers("/actuator/health", "/actuator/info", "/actuator/metrics").permitAll()
                 .requestMatchers("/swagger-ui/**", "/api-docs/**", "/swagger-ui.html").permitAll()
                 .requestMatchers("/api/search/courses", "/api/search/autocomplete").permitAll()
-                // All other requests require authentication
+                // All other requests require a valid JWT
                 .anyRequest().authenticated()
             )
             .oauth2ResourceServer(oauth2 -> oauth2
@@ -67,9 +77,15 @@ public class SecurityConfig {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
+        List<String> origins = Arrays.stream(allowedOriginsRaw.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+
+        log.info("[CORS] Allowed origins: {}", origins);
+
         CorsConfiguration configuration = new CorsConfiguration();
-        // Explicit origins (NOT wildcard) — required when allowCredentials=true
-        configuration.setAllowedOrigins(allowedOrigins);
+        configuration.setAllowedOrigins(origins);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Tenant-ID", "X-Requested-With"));
         configuration.setAllowCredentials(true);
@@ -78,16 +94,5 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
-    }
-
-    /**
-     * JwtDecoder is configured dynamically per-tenant realm.
-     * The issuer URI is resolved at runtime from the tenant context.
-     */
-    @Bean
-    public JwtDecoder jwtDecoder() {
-        // The frontend users authenticate against the lms-demo realm
-        String jwkSetUri = keycloakUrl + "/realms/lms-demo/protocol/openid-connect/certs";
-        return NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();
     }
 }

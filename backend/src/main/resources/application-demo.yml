@@ -1,0 +1,130 @@
+# ─── Demo / Free-tier deployment profile ──────────────────────────────────────
+# Activated when SPRING_PROFILES_ACTIVE=demo (set in render.yaml)
+# All secrets come from environment variables — NO defaults here.
+
+spring:
+  config:
+    activate:
+      on-profile: demo
+
+  # ─── Database (Neon.tech free PostgreSQL) ─────────────────────────────────
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 3        # Neon free tier: max 10 connections
+      minimum-idle: 1
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: LmsDemoPool
+
+  # ─── Redis (Upstash free tier — URL-based) ─────────────────────────────────
+  data:
+    redis:
+      url: ${SPRING_DATA_REDIS_URL:redis://localhost:6379}
+      lettuce:
+        pool:
+          max-active: 4
+          max-idle: 2
+          min-idle: 0
+
+  # ─── Disable Kafka entirely in sync mode ─────────────────────────────────
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration
+
+  # ─── JPA: validate against the migrated schema ─────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  # ─── Batch: initialize schema on public schema (needed for Spring Batch) ───
+  batch:
+    jdbc:
+      initialize-schema: always
+
+  # ─── Mail (optional — failure is non-fatal) ────────────────────────────────
+  mail:
+    host: ${SPRING_MAIL_HOST:smtp.gmail.com}
+    port: ${SPRING_MAIL_PORT:587}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
+# ─── Server ────────────────────────────────────────────────────────────────
+server:
+  port: ${PORT:8080}
+  compression:
+    enabled: true
+    mime-types: application/json,text/plain
+
+# ─── LMS Events ─────────────────────────────────────────────────────────────
+lms:
+  events:
+    mode: sync           # In-process events, no Kafka broker required
+  tenant:
+    default-slug: ${LMS_DEFAULT_TENANT:demo}
+
+# ─── App ─────────────────────────────────────────────────────────────────────
+app:
+  base-url: ${APP_BASE_URL}
+  mail:
+    from: ${MAIL_FROM:noreply@lms.demo}
+
+# ─── CORS ──────────────────────────────────────────────────────────────────
+cors:
+  allowed-origins: >
+    ${CORS_ALLOWED_ORIGINS:https://ishaanvijaywargia12.github.io,http://localhost:5173,http://localhost:3000}
+
+# ─── Auth (Spring Authorization Server — self-hosted JWT issuer) ────────────
+# The backend itself issues JWTs at ${APP_BASE_URL}/oauth2/token
+# No external Keycloak instance required.
+keycloak:
+  auth-server-url: ${APP_BASE_URL}   # Points to self for compatibility
+
+# ─── MinIO / Object Storage ────────────────────────────────────────────────
+minio:
+  url: ${MINIO_URL:disabled}
+  access-key: ${MINIO_ACCESS_KEY:disabled}
+  secret-key: ${MINIO_SECRET_KEY:disabled}
+
+# ─── Qdrant (optional — RAG feature) ──────────────────────────────────────
+qdrant:
+  host: ${QDRANT_HOST:disabled}
+  port: ${QDRANT_PORT:6334}
+  api-key: ${QDRANT_API_KEY:}
+  use-tls: ${QDRANT_USE_TLS:true}
+
+# ─── Gemini (optional — RAG generation) ───────────────────────────────────
+gemini:
+  api-key: ${GEMINI_API_KEY:}
+
+# ─── Actuator: honest health/readiness ─────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+  health:
+    redis:
+      enabled: true
+    db:
+      enabled: true
+
+# ─── Logging ───────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.lms: INFO
+    org.hibernate.SQL: WARN
+    org.apache.kafka: ERROR
+    org.springframework.security: INFO

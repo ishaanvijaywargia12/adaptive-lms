@@ -79,7 +79,10 @@ function LiveRoom({ session, onLeave }: { session: LiveSession; onLeave: () => v
 
   useEffect(() => {
     const client = new Client({
-      webSocketFactory: () => new SockJS(`${import.meta.env.VITE_API_URL ?? ""}/ws`),
+      webSocketFactory: () => {
+        const wsUrl = import.meta.env.VITE_WS_URL || (import.meta.env.VITE_API_URL || "").replace(/\/api$/, "") + "/ws";
+        return new SockJS(wsUrl);
+      },
       connectHeaders: { Authorization: `Bearer ${getToken()}` },
       onConnect: () => {
         client.subscribe(`/topic/room/${session.roomId}`, (msg) => {

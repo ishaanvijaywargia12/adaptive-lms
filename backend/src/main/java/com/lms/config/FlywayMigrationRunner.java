@@ -1,109 +1,117 @@
 package com.lms.config;
 
-import com.lms.tenant.Tenant;
-import com.lms.tenant.TenantRepository;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.flywaydb.core.Flyway;
-import org.springframework.boot.autoconfigure.flyway.FlywayProperties;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
-import org.springframework.core.annotation.Order;
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Deterministic programmatic Flyway migration runner.
  *
- * <p>Execution order (before DataSeeder):
+ * <p><strong>Startup ordering (critical):</strong>
  * <ol>
- *   <li>Apply V1 migration against the {@code public} schema (tenants registry, global_configs)</li>
- *   <li>Read all active tenants from {@code public.tenants}</li>
- *   <li>For each tenant, create schema if absent, then apply V2 migrations</li>
+ *   <li>This bean implements {@link InitializingBean} — Spring calls {@code afterPropertiesSet()}
+ *       during the bean initialization phase, BEFORE {@code EntityManagerFactory} is created.</li>
+ *   <li>{@link JpaConfig} declares {@code @DependsOn("flywayMigrationRunner")} on the JPA
+ *       entity manager factory, guaranteeing migrations complete before Hibernate validates.</li>
+ *   <li>Step 1: Apply V1 migration to the {@code public} schema (tenants table).</li>
+ *   <li>Step 2: Read all active tenants using plain JDBC (no JPA, no circular dependency).</li>
+ *   <li>Step 3: Apply V2 migration to each tenant schema.</li>
  * </ol>
  *
- * <p>This is idempotent — Flyway tracks applied versions and only runs new migrations.
- * Using {@code ApplicationReadyEvent} with {@code @Order(1)} ensures it runs
- * before {@code DataSeeder} ({@code @Order(2)}).
+ * <p>This is idempotent — Flyway tracks applied versions per schema.
  */
-@Component
-@RequiredArgsConstructor
+@Component("flywayMigrationRunner")
 @Slf4j
-public class FlywayMigrationRunner {
+public class FlywayMigrationRunner implements InitializingBean {
 
     private final DataSource dataSource;
-    private final TenantRepository tenantRepository;
 
-    @EventListener(ApplicationReadyEvent.class)
-    @Order(1)
-    public void runMigrations() {
-        log.info("=== Flyway Migration Runner starting ===");
+    @Value("${lms.tenant.default-slug:demo}")
+    private String defaultTenantSlug;
 
-        // Step 1: Shared public schema (V1)
-        migratePublicSchema();
-
-        // Step 2: Per-tenant schemas (V2)
-        migrateAllTenantSchemas();
-
-        log.info("=== Flyway Migration Runner complete ===");
+    public FlywayMigrationRunner(DataSource dataSource) {
+        this.dataSource = dataSource;
     }
 
     /**
-     * Runs V1__create_shared_schema.sql against the {@code public} schema.
+     * Called by Spring during bean initialization — before EntityManagerFactory is created.
+     * This guarantees the schema exists before Hibernate validation runs.
      */
+    @Override
+    public void afterPropertiesSet() {
+        log.info("=== FlywayMigrationRunner starting (InitializingBean phase) ===");
+        try {
+            // Step 1: Public schema (tenants registry, global_configs)
+            migratePublicSchema();
+
+            // Step 2: All existing tenant schemas
+            List<String> tenantSchemas = loadTenantSchemasFromJdbc();
+            for (String schema : tenantSchemas) {
+                migrateTenantSchema(schema);
+            }
+
+            log.info("=== FlywayMigrationRunner complete — {} tenant schemas migrated ===",
+                    tenantSchemas.size());
+        } catch (Exception e) {
+            log.error("=== FlywayMigrationRunner FAILED: {} ===", e.getMessage(), e);
+            throw new RuntimeException("Schema migration failed — cannot start application", e);
+        }
+    }
+
+    // ─── Public Schema ────────────────────────────────────────────────────────
+
     private void migratePublicSchema() {
-        log.info("[FLYWAY] Migrating public schema...");
+        log.info("[FLYWAY] Migrating public schema (V1)...");
         Flyway flyway = Flyway.configure()
                 .dataSource(dataSource)
                 .schemas("public")
                 .locations("classpath:db/migration")
                 .table("flyway_schema_history")
-                // Only apply V1 here — V2 is per-tenant only
-                .sqlMigrationPrefix("V")
                 .target("1")
                 .baselineOnMigrate(true)
                 .baselineVersion("0")
                 .outOfOrder(false)
                 .load();
-        try {
-            flyway.migrate();
-            log.info("[FLYWAY] Public schema migration complete.");
-        } catch (Exception e) {
-            log.error("[FLYWAY] Public schema migration failed: {}", e.getMessage(), e);
-            throw e;
-        }
+        int applied = flyway.migrate().migrationsExecuted;
+        log.info("[FLYWAY] Public schema: {} migration(s) applied.", applied);
     }
 
+    // ─── Tenant Schemas ───────────────────────────────────────────────────────
+
     /**
-     * For each active tenant: ensures the schema exists, then runs V2 migrations.
+     * Reads active tenant schema names directly from PostgreSQL using plain JDBC.
+     * Does NOT use JPA/Hibernate (which hasn't initialized yet at this point).
      */
-    private void migrateAllTenantSchemas() {
-        List<Tenant> tenants;
-        try {
-            tenants = tenantRepository.findAll();
-        } catch (Exception e) {
-            log.warn("[FLYWAY] Cannot read tenants (public schema may be empty on first boot): {}", e.getMessage());
-            return;
-        }
-
-        if (tenants.isEmpty()) {
-            log.info("[FLYWAY] No tenants found yet — tenant schemas will be created on first tenant registration.");
-            return;
-        }
-
-        for (Tenant tenant : tenants) {
-            if (!tenant.isActive()) {
-                log.debug("[FLYWAY] Skipping inactive tenant: {}", tenant.getSchemaName());
-                continue;
+    private List<String> loadTenantSchemasFromJdbc() {
+        List<String> schemas = new ArrayList<>();
+        String sql = "SELECT schema_name FROM public.tenants WHERE is_active = true";
+        try (Connection conn = dataSource.getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                schemas.add(rs.getString("schema_name"));
             }
-            migrateTenantSchema(tenant.getSchemaName());
+            log.info("[FLYWAY] Found {} active tenant schema(s) via JDBC.", schemas.size());
+        } catch (Exception e) {
+            // On a brand-new database the public.tenants table itself may not exist yet
+            // (V1 hasn't run) — that's fine; we just return empty and continue.
+            log.warn("[FLYWAY] Could not read tenant list (expected on first boot): {}", e.getMessage());
         }
+        return schemas;
     }
 
     /**
      * Creates (if absent) and migrates a single tenant schema.
+     * Safe to call multiple times — Flyway is idempotent.
      *
      * @param schemaName e.g. "tenant_demo"
      */
@@ -114,17 +122,16 @@ public class FlywayMigrationRunner {
                 .schemas(schemaName)
                 .locations("classpath:db/migration")
                 .table("flyway_schema_history")
-                // Only V2 and above — tenant schemas don't get V1 (public schema tables)
-                .sqlMigrationPrefix("V")
-                .target("2")
+                // Skip V1 (public-schema only). Apply V2+ for tenant schemas.
+                .target("3")
                 .baselineOnMigrate(true)
-                .baselineVersion("1")  // Pretend V1 already ran (it's for public only)
+                .baselineVersion("1")
                 .outOfOrder(false)
                 .createSchemas(true)
                 .load();
         try {
-            flyway.migrate();
-            log.info("[FLYWAY] Tenant schema '{}' migration complete.", schemaName);
+            int applied = flyway.migrate().migrationsExecuted;
+            log.info("[FLYWAY] Tenant schema '{}': {} migration(s) applied.", schemaName, applied);
         } catch (Exception e) {
             log.error("[FLYWAY] Tenant schema '{}' migration failed: {}", schemaName, e.getMessage(), e);
             throw new RuntimeException("Failed to migrate tenant schema: " + schemaName, e);

@@ -240,6 +240,11 @@ public class CertificateService {
         }
     }
 
+    public Certificate findById(UUID id) {
+        return certificateRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Certificate not found: " + id));
+    }
+
     public Certificate verifyCertificate(UUID verificationCode) {
         return certificateRepository.findByVerificationCode(verificationCode)
                 .orElseThrow(() -> new RuntimeException("Certificate not found or invalid"));
