@@ -11,7 +11,6 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class KafkaProducerService {
 
@@ -20,6 +19,15 @@ public class KafkaProducerService {
 
     @Value("${lms.events.mode:kafka}")
     private String eventsMode;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public KafkaProducerService(
+            @org.springframework.beans.factory.annotation.Autowired(required = false) KafkaTemplate<String, Object> kafkaTemplate,
+            ApplicationEventPublisher eventPublisher
+    ) {
+        this.kafkaTemplate = kafkaTemplate;
+        this.eventPublisher = eventPublisher;
+    }
 
     private static final String LESSON_COMPLETED = "lms.lesson.completed";
     private static final String QUIZ_PASSED = "lms.quiz.passed";
@@ -109,8 +117,8 @@ public class KafkaProducerService {
     }
 
     private void publish(String topic, String key, Object payload) {
-        if ("sync".equalsIgnoreCase(eventsMode)) {
-            log.debug("[EVENT] Sync mode — publishing locally: topic={} payload={}", topic, payload.getClass().getSimpleName());
+        if ("sync".equalsIgnoreCase(eventsMode) || kafkaTemplate == null) {
+            log.debug("[EVENT] Sync mode or Kafka disabled — publishing locally: topic={} payload={}", topic, payload.getClass().getSimpleName());
             eventPublisher.publishEvent(payload);
             return;
         }
