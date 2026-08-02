@@ -39,7 +39,7 @@ spring:
   # ─── JPA: validate against the migrated schema ─────────────────────────────
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: none
     show-sql: false
 
   # ─── Batch: initialize schema on public schema (needed for Spring Batch) ───
