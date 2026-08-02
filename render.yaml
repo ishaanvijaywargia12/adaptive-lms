@@ -36,6 +36,10 @@ services:
       - key: SPRING_DATASOURCE_PASSWORD
         sync: false  # Neon password
 
+      # ── Redis (Upstash free tier string) ────────────────────────────────────
+      - key: SPRING_DATA_REDIS_URL
+        sync: false  # Paste your Upstash Redis URL e.g. rediss://default:xxx@xxx.upstash.io:6379
+
       # ── Event Mode (sync = in-process, zero Kafka dependency) ────────────────
       - key: LMS_EVENTS_MODE
         value: sync
