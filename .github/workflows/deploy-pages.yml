@@ -45,9 +45,9 @@ jobs:
           # These are set as GitHub Actions Secrets:
           # Settings → Secrets and variables → Actions → New repository secret
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
-          VITE_KEYCLOAK_URL: ${{ secrets.VITE_KEYCLOAK_URL }}
-          VITE_KEYCLOAK_REALM: ${{ secrets.VITE_KEYCLOAK_REALM || 'lms-demo' }}
-          VITE_KEYCLOAK_CLIENT_ID: ${{ secrets.VITE_KEYCLOAK_CLIENT_ID || 'lms-frontend' }}
+          VITE_AUTH_AUTHORITY: ${{ secrets.VITE_AUTH_AUTHORITY }}
+          VITE_AUTH_CLIENT_ID: ${{ secrets.VITE_AUTH_CLIENT_ID || 'lms-frontend' }}
+          VITE_TENANT_ID: ${{ secrets.VITE_TENANT_ID || 'demo' }}
           VITE_WS_URL: ${{ secrets.VITE_WS_URL }}
 
       - name: Add .nojekyll to prevent Jekyll processing
