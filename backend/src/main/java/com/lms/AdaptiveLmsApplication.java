@@ -10,7 +10,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableJpaAuditing(auditorAwareRef = "auditorProvider")
 @EnableCaching
-@EnableKafka
 @EnableScheduling
 public class AdaptiveLmsApplication {
 

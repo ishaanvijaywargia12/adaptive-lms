@@ -17,6 +17,7 @@ import org.springframework.kafka.config.TopicBuilder;
  * Kafka admin clients or topics when running without a broker.
  */
 @Configuration
+@org.springframework.kafka.annotation.EnableKafka
 @ConditionalOnProperty(name = "lms.events.mode", havingValue = "kafka", matchIfMissing = true)
 public class KafkaConfig {
 
