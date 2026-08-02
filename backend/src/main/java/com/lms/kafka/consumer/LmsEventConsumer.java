@@ -7,6 +7,7 @@ import com.lms.module.notification.service.NotificationService;
 import com.lms.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
@@ -27,16 +28,19 @@ public class LmsEventConsumer {
     private final NotificationService notificationService;
     private final EventIdempotencyService idempotencyService;
 
+    @EventListener
     @KafkaListener(topics = "lms.lesson.completed", groupId = "lms-consumer-group")
     public void onLessonCompleted(BaseEvent.LessonCompletedEvent event) {
         if (idempotencyService.isProcessed(event.eventId())) return;
         try {
             TenantContext.setCurrentTenant(event.tenantId());
             log.info("Lesson completed: student={} lesson={}", event.studentId(), event.lessonId());
-            // Award points
+            // Award lesson points (idempotent by eventId)
+            String idemKey = "LESSON_COMPLETE:" + event.eventId();
             gamificationService.award(event.studentId(), "LESSON_COMPLETE", event.lessonId(),
-                    GamificationService.PTS_LESSON_COMPLETE);
-            // Send notification
+                    GamificationService.PTS_LESSON_COMPLETE, idemKey);
+            // Update streak (separate from award — no recursion)
+            gamificationService.recordStreakActivity(event.studentId());
             notificationService.send(event.studentId(), "Lesson Completed! 🎯",
                     "You completed a lesson and earned 10 points.", "LESSON_COMPLETE");
             idempotencyService.markProcessed(event.eventId(), "lms.lesson.completed");
@@ -45,27 +49,31 @@ public class LmsEventConsumer {
         }
     }
 
+    @EventListener
     @KafkaListener(topics = "lms.quiz.passed", groupId = "lms-consumer-group")
     public void onQuizPassed(BaseEvent.QuizPassedEvent event) {
         if (idempotencyService.isProcessed(event.eventId())) return;
         try {
             TenantContext.setCurrentTenant(event.tenantId());
 
-            // Fix: award total points in a single transaction (pass + optional ace bonus)
-            // This prevents QUIZ_ACE_BONUS from being double-counted via two separate awards
-            int totalPoints = GamificationService.PTS_QUIZ_PASS;
-            String type = "QUIZ_PASS";
             boolean isAce = event.score() >= 90.0;
 
+            // Award base quiz pass points
+            gamificationService.award(event.studentId(), "QUIZ_PASS", event.quizId(),
+                    GamificationService.PTS_QUIZ_PASS, "QUIZ_PASS:" + event.eventId());
+
+            // Award ace bonus separately (so QUIZ_ACE badge evaluation works)
             if (isAce) {
-                totalPoints += GamificationService.PTS_QUIZ_ACE_BONUS;
-                type = "QUIZ_ACE_BONUS"; // Use ace type so badge evaluation works
+                gamificationService.award(event.studentId(), "QUIZ_ACE_BONUS", event.quizId(),
+                        GamificationService.PTS_QUIZ_ACE_BONUS, "QUIZ_ACE:" + event.eventId());
             }
 
-            gamificationService.award(event.studentId(), type, event.quizId(), totalPoints);
+            // Update streak
+            gamificationService.recordStreakActivity(event.studentId());
 
+            int totalPoints = GamificationService.PTS_QUIZ_PASS + (isAce ? GamificationService.PTS_QUIZ_ACE_BONUS : 0);
             String message = isAce
-                    ? String.format("Quiz Ace! 🏆 Scored %.0f%% and earned %d points (including ace bonus).", event.score(), totalPoints)
+                    ? String.format("Quiz Ace! 🏆 Scored %.0f%% and earned %d points (including +10 ace bonus).", event.score(), totalPoints)
                     : String.format("Quiz Passed! 🎉 Scored %.0f%% and earned %d points.", event.score(), totalPoints);
 
             notificationService.send(event.studentId(), isAce ? "Quiz Ace! 🏆" : "Quiz Passed! 🎉", message, "QUIZ_PASSED");
@@ -75,15 +83,18 @@ public class LmsEventConsumer {
         }
     }
 
+    @EventListener
     @KafkaListener(topics = "lms.course.completed", groupId = "lms-consumer-group")
     public void onCourseCompleted(BaseEvent.CourseCompletedEvent event) {
         if (idempotencyService.isProcessed(event.eventId())) return;
         try {
             TenantContext.setCurrentTenant(event.tenantId());
-            // Award points
+            // Award points (idempotent)
             gamificationService.award(event.studentId(), "COURSE_COMPLETE", event.courseId(),
-                    GamificationService.PTS_COURSE_COMPLETE);
-            // Generate certificate
+                    GamificationService.PTS_COURSE_COMPLETE, "COURSE_COMPLETE:" + event.eventId());
+            // Update streak
+            gamificationService.recordStreakActivity(event.studentId());
+            // Generate certificate (idempotent — checks existing before creating)
             certificateService.generateCertificate(event.studentId(), event.courseId(), event.tenantId());
             notificationService.send(event.studentId(), "🎓 Course Completed!",
                     "Congratulations! Your certificate is being generated.", "COURSE_COMPLETE");
@@ -93,6 +104,7 @@ public class LmsEventConsumer {
         }
     }
 
+    @EventListener
     @KafkaListener(topics = "lms.assignment.submitted", groupId = "lms-consumer-group")
     public void onAssignmentSubmitted(BaseEvent.AssignmentSubmittedEvent event) {
         if (idempotencyService.isProcessed(event.eventId())) return;
@@ -108,6 +120,7 @@ public class LmsEventConsumer {
         }
     }
 
+    @EventListener
     @KafkaListener(topics = "lms.assignment.graded", groupId = "lms-consumer-group")
     public void onAssignmentGraded(BaseEvent.AssignmentGradedEvent event) {
         if (idempotencyService.isProcessed(event.eventId())) return;
@@ -126,6 +139,7 @@ public class LmsEventConsumer {
         }
     }
 
+    @EventListener
     @KafkaListener(topics = "lms.badge.earned", groupId = "lms-consumer-group")
     public void onBadgeEarned(BaseEvent.BadgeEarnedEvent event) {
         if (idempotencyService.isProcessed(event.eventId())) return;
@@ -139,6 +153,7 @@ public class LmsEventConsumer {
         }
     }
 
+    @EventListener
     @KafkaListener(topics = "lms.live.session.started", groupId = "lms-consumer-group")
     public void onLiveSessionStarted(BaseEvent.LiveSessionStartedEvent event) {
         if (idempotencyService.isProcessed(event.eventId())) return;
@@ -151,6 +166,7 @@ public class LmsEventConsumer {
         }
     }
 
+    @EventListener
     @KafkaListener(topics = "lms.enrollment.confirmed", groupId = "lms-consumer-group")
     public void onEnrollmentConfirmed(BaseEvent.EnrollmentConfirmedEvent event) {
         if (idempotencyService.isProcessed(event.eventId())) return;

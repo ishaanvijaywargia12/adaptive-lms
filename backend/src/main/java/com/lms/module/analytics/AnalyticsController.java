@@ -14,12 +14,15 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import com.lms.security.CurrentUserService;
 
 @RestController
 @RequestMapping("/api/analytics")
 @RequiredArgsConstructor
 @Tag(name = "Analytics", description = "Instructor and student dashboard analytics")
 public class AnalyticsController {
+
+    private final CurrentUserService currentUserService;
 
     private final EnrollmentRepository enrollmentRepository;
 
@@ -28,7 +31,7 @@ public class AnalyticsController {
     @Operation(summary = "Get instructor analytics dashboard summary")
     public ResponseEntity<ApiResponse<Map<String, Object>>> instructorDashboard(
             @AuthenticationPrincipal Jwt jwt) {
-        UUID instructorId = UUID.fromString(jwt.getSubject());
+        UUID instructorId = currentUserService.resolveOrProvision(jwt).getId();
         Map<String, Object> data = new HashMap<>();
 
         long totalEnrollments = enrollmentRepository.countByInstructorId(instructorId);
@@ -46,7 +49,7 @@ public class AnalyticsController {
     @Operation(summary = "Get student analytics dashboard summary")
     public ResponseEntity<ApiResponse<Map<String, Object>>> studentDashboard(
             @AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         Map<String, Object> data = new HashMap<>();
 
         long enrollments = enrollmentRepository.countByStudentId(studentId);

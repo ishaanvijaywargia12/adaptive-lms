@@ -14,12 +14,15 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
+import com.lms.security.CurrentUserService;
 
 @RestController
 @RequestMapping("/api/quizzes")
 @RequiredArgsConstructor
 @Tag(name = "Quiz", description = "Quiz attempt and submission")
 public class QuizController {
+
+    private final CurrentUserService currentUserService;
 
     private final QuizService quizService;
 
@@ -43,7 +46,7 @@ public class QuizController {
     public ResponseEntity<ApiResponse<QuizStartResponse>> startQuiz(
             @PathVariable UUID quizId,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success("Quiz started", quizService.startAttempt(quizId, studentId)));
     }
 
@@ -58,7 +61,7 @@ public class QuizController {
             @PathVariable UUID attemptId,
             @Valid @RequestBody QuizSubmitRequest request,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success("Quiz submitted",
                 quizService.submitAttempt(attemptId, studentId, request.answers())));
     }

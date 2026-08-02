@@ -5,11 +5,10 @@ import com.lms.kafka.event.RagDocumentIngestionEvent;
 import com.lms.kafka.event.RagDoubtSubmittedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
-
-import java.time.LocalDateTime;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -17,6 +16,10 @@ import java.util.UUID;
 public class KafkaProducerService {
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final ApplicationEventPublisher eventPublisher;
+
+    @Value("${lms.events.mode:kafka}")
+    private String eventsMode;
 
     private static final String LESSON_COMPLETED = "lms.lesson.completed";
     private static final String QUIZ_PASSED = "lms.quiz.passed";
@@ -32,7 +35,6 @@ public class KafkaProducerService {
     private static final String COURSE_PUBLISHED = "lms.course.published";
     private static final String NOTIFICATION_SEND = "lms.notification.send";
 
-    // ─── RAG Topic Constants ────────────────────────────────────────────────
     private static final String RAG_DOCUMENT_INGESTION  = "lms.rag.document.ingestion.requested";
     private static final String RAG_DOUBT_SUBMITTED     = "lms.rag.doubt.submitted";
     private static final String RAG_DOCUMENT_INGEST_DLQ = "lms.rag.document.ingestion.dlq";
@@ -90,49 +92,45 @@ public class KafkaProducerService {
         publish(NOTIFICATION_SEND, event.userId().toString(), event);
     }
 
-    // ─── RAG Publish Methods ────────────────────────────────────────────────
-
-    /**
-     * Publishes a document ingestion event when an instructor uploads a course PDF.
-     * Key = courseId (ensures all chunks for a course land in the same partition).
-     */
     public void publishDocumentIngestionEvent(RagDocumentIngestionEvent event) {
         publish(RAG_DOCUMENT_INGESTION, event.getCourseId().toString(), event);
     }
 
-    /**
-     * Publishes a doubt submission event for async RAG processing.
-     * Key = studentId (collocates a student's doubts in the same partition).
-     */
     public void publishDoubtSubmittedEvent(RagDoubtSubmittedEvent event) {
         publish(RAG_DOUBT_SUBMITTED, event.getStudentId().toString(), event);
     }
 
-    /**
-     * Routes a failed ingestion event to the dead-letter topic for manual replay.
-     */
     public void publishIngestionDlq(RagDocumentIngestionEvent event) {
         publish(RAG_DOCUMENT_INGEST_DLQ, event.getCourseId().toString(), event);
     }
 
-    /**
-     * Routes a failed doubt event to the dead-letter topic for manual replay.
-     */
     public void publishDoubtDlq(RagDoubtSubmittedEvent event) {
         publish(RAG_DOUBT_DLQ, event.getStudentId().toString(), event);
     }
 
     private void publish(String topic, String key, Object payload) {
-        kafkaTemplate.send(topic, key, payload)
-                .whenComplete((result, ex) -> {
-                    if (ex != null) {
-                        log.error("Failed to publish to topic {}: {}", topic, ex.getMessage());
-                    } else {
-                        log.debug("Published to topic {} partition {} offset {}",
-                                topic,
-                                result.getRecordMetadata().partition(),
-                                result.getRecordMetadata().offset());
-                    }
-                });
+        if ("sync".equalsIgnoreCase(eventsMode)) {
+            log.debug("[EVENT] Sync mode — publishing locally: topic={} payload={}", topic, payload.getClass().getSimpleName());
+            eventPublisher.publishEvent(payload);
+            return;
+        }
+
+        try {
+            kafkaTemplate.send(topic, key, payload)
+                    .whenComplete((result, ex) -> {
+                        if (ex != null) {
+                            log.error("Kafka publish failed topic={} — falling back to in-process sync: {}", topic, ex.getMessage());
+                            eventPublisher.publishEvent(payload);
+                        } else {
+                            log.debug("Published to Kafka topic {} partition {} offset {}",
+                                    topic,
+                                    result.getRecordMetadata().partition(),
+                                    result.getRecordMetadata().offset());
+                        }
+                    });
+        } catch (Exception e) {
+            log.error("Kafka producer exception for topic {} — falling back to in-process sync: {}", topic, e.getMessage());
+            eventPublisher.publishEvent(payload);
+        }
     }
 }

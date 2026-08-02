@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS lessons (
     module_id UUID NOT NULL REFERENCES modules(id) ON DELETE CASCADE,
     title VARCHAR(500) NOT NULL,
     content_type VARCHAR(20) NOT NULL CHECK (content_type IN ('VIDEO','TEXT','PDF','QUIZ')),
+    -- content_url stores durable object key (e.g. 'content/tenant/course/lesson/file.mp4')
+    -- NOT a presigned URL. Fresh download URLs are generated on demand.
     content_url TEXT,
     content_text TEXT,
     duration_seconds INT DEFAULT 0,
@@ -162,6 +164,8 @@ CREATE TABLE IF NOT EXISTS quiz_attempts (
     passed BOOLEAN,
     started_at TIMESTAMP NOT NULL DEFAULT now(),
     completed_at TIMESTAMP,
+    -- Server-authoritative deadline. Redis TTL is cache only; this is the source of truth.
+    deadline_at TIMESTAMP,
     attempt_number INT NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
     updated_at TIMESTAMP,
@@ -258,9 +262,13 @@ CREATE TABLE IF NOT EXISTS certificates (
     student_id UUID NOT NULL REFERENCES users(id),
     course_id UUID NOT NULL REFERENCES courses(id),
     issued_at TIMESTAMP NOT NULL DEFAULT now(),
+    -- Durable object keys (bucket path). Fresh signed URLs generated on request.
+    pdf_object_key TEXT,
+    qr_object_key TEXT,
+    -- Legacy URL fields kept for backward compat; prefer object keys above.
     certificate_url TEXT,
-    verification_code UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
     qr_code_url TEXT,
+    verification_code UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
     is_valid BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
     updated_at TIMESTAMP,
@@ -331,6 +339,8 @@ CREATE TABLE IF NOT EXISTS point_transactions (
     points INT NOT NULL,
     type VARCHAR(50) NOT NULL,
     reference_id UUID,
+    -- Idempotency key prevents duplicate awards from event replay
+    idempotency_key VARCHAR(255) UNIQUE,
     created_at TIMESTAMP NOT NULL DEFAULT now(),
     updated_at TIMESTAMP,
     created_by VARCHAR(255),
@@ -434,14 +444,43 @@ CREATE TABLE IF NOT EXISTS doubt_sessions (
     course_id       UUID NOT NULL REFERENCES courses(id),
     question_text   TEXT NOT NULL,
     answer_text     TEXT,
+    -- JSON array of {filename, objectKey, chunkIndex, score, excerpt} persisted with answer
+    sources_json    JSONB,
     status          VARCHAR(20) NOT NULL DEFAULT 'PENDING'
                         CHECK (status IN ('PENDING', 'RESOLVED', 'FAILED')),
+    error_message   TEXT,
     resolved_at     TIMESTAMP,
     created_at      TIMESTAMP NOT NULL DEFAULT now(),
     updated_at      TIMESTAMP,
     created_by      VARCHAR(255),
     updated_by      VARCHAR(255)
 );
+
+-- ─── RAG Documents ────────────────────────────────────────────────────────────
+-- Tracks the ingestion lifecycle of uploaded course materials.
+CREATE TABLE IF NOT EXISTS rag_documents (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    course_id       UUID NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    object_key      TEXT NOT NULL,
+    filename        TEXT NOT NULL,
+    content_type    VARCHAR(100),
+    file_size_bytes BIGINT,
+    -- SHA-256 checksum of file content — used for idempotent re-indexing
+    checksum        VARCHAR(64),
+    status          VARCHAR(20) NOT NULL DEFAULT 'UPLOADED'
+                        CHECK (status IN ('UPLOADED','INDEXING','INDEXED','FAILED')),
+    chunk_count     INT DEFAULT 0,
+    error_message   TEXT,
+    indexed_at      TIMESTAMP,
+    created_at      TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMP,
+    created_by      VARCHAR(255),
+    updated_by      VARCHAR(255),
+    CONSTRAINT uq_rag_document UNIQUE (course_id, object_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rag_documents_course ON rag_documents(course_id);
+CREATE INDEX IF NOT EXISTS idx_rag_documents_status ON rag_documents(course_id, status);
 
 CREATE INDEX IF NOT EXISTS idx_doubt_sessions_student ON doubt_sessions(student_id);
 CREATE INDEX IF NOT EXISTS idx_doubt_sessions_course  ON doubt_sessions(course_id);

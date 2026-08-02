@@ -9,18 +9,6 @@ import java.util.UUID;
 
 /**
  * Persists every student doubt submission and its RAG-generated answer.
- * <p>
- * This table serves three purposes:
- * <ol>
- *   <li>Polling endpoint — frontend polls {@code GET /api/v1/rag/doubts/{sessionId}}
- *       to check status before the WebSocket notification arrives.</li>
- *   <li>Audit trail — instructors can review all doubts and answers per course.</li>
- *   <li>Analytics — answer latency, PENDING ratio, and DLQ volume can be derived
- *       from this table.</li>
- * </ol>
- *
- * <p>Maps to the {@code doubt_sessions} table defined in
- * {@code V2__create_tenant_schema.sql} (per-tenant schema).
  */
 @Entity
 @Table(name = "doubt_sessions",
@@ -51,9 +39,19 @@ public class DoubtSession extends BaseEntity {
     private String answerText;
 
     /**
+     * JSON array of sources used for generating the answer.
+     */
+    @Column(name = "sources_json", columnDefinition = "JSONB")
+    private String sourcesJson;
+
+    /**
+     * Error message if status is FAILED.
+     */
+    @Column(name = "error_message", columnDefinition = "TEXT")
+    private String errorMessage;
+
+    /**
      * Current lifecycle state of this doubt session.
-     * Starts as {@link DoubtStatus#PENDING}, transitions to
-     * {@link DoubtStatus#RESOLVED} or {@link DoubtStatus#FAILED}.
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)

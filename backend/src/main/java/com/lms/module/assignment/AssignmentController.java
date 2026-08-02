@@ -14,12 +14,15 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 import java.util.UUID;
+import com.lms.security.CurrentUserService;
 
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
 @Tag(name = "Assignments", description = "Assignment submission and grading")
 public class AssignmentController {
+
+    private final CurrentUserService currentUserService;
 
     private final AssignmentService assignmentService;
 
@@ -30,7 +33,7 @@ public class AssignmentController {
             @PathVariable UUID id,
             @RequestBody SubmitAssignmentRequest request,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success("Submitted", assignmentService.submit(id, studentId, request)));
     }
 
@@ -51,7 +54,7 @@ public class AssignmentController {
             @PathVariable UUID id,
             @RequestBody GradeRequest request,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID instructorId = UUID.fromString(jwt.getSubject());
+        UUID instructorId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success("Graded", assignmentService.grade(id, request, instructorId)));
     }
 
@@ -69,7 +72,7 @@ public class AssignmentController {
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success(assignmentService.getStudentSubmissions(studentId, PageRequest.of(page, size))));
     }
 

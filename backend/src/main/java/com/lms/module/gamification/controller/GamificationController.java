@@ -17,12 +17,15 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
+import com.lms.security.CurrentUserService;
 
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
 @Tag(name = "Gamification", description = "Points, badges, streaks, leaderboard")
 public class GamificationController {
+
+    private final CurrentUserService currentUserService;
 
     private final GamificationService gamificationService;
     private final LeaderboardService leaderboardService;
@@ -33,7 +36,7 @@ public class GamificationController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Get my total points")
     public ResponseEntity<ApiResponse<Long>> getMyPoints(@AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success(gamificationService.getTotalPoints(studentId)));
     }
 
@@ -41,7 +44,7 @@ public class GamificationController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Get my streak")
     public ResponseEntity<ApiResponse<Streak>> getMyStreak(@AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success(gamificationService.getStreak(studentId)));
     }
 
@@ -49,7 +52,7 @@ public class GamificationController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Get my earned badges")
     public ResponseEntity<ApiResponse<List<StudentBadge>>> getMyBadges(@AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success(gamificationService.getStudentBadges(studentId)));
     }
 
@@ -90,7 +93,7 @@ public class GamificationController {
     public ResponseEntity<ApiResponse<LeaderboardEntryDto>> getMyRank(
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam(defaultValue = "ALL_TIME") String period) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success(
                 leaderboardService.getMyRank(studentId, null, period)));
     }

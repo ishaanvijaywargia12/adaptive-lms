@@ -3,20 +3,25 @@ package com.lms.module.lesson.controller;
 import com.lms.common.response.ApiResponse;
 import com.lms.module.lesson.entity.Lesson;
 import com.lms.module.lesson.service.LessonService;
-import com.lms.module.enrollment.service.EnrollmentService;
+import com.lms.security.CurrentUserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Lesson management endpoints.
+ *
+ * NOTE: The lesson-completion endpoint is intentionally NOT duplicated here.
+ * Canonical endpoint: POST /api/lessons/{lessonId}/complete in EnrollmentController.
+ */
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
@@ -24,7 +29,7 @@ import java.util.UUID;
 public class LessonController {
 
     private final LessonService lessonService;
-    private final EnrollmentService enrollmentService;
+    private final CurrentUserService currentUserService;
 
     @PostMapping("/modules/{moduleId}/lessons")
     @PreAuthorize("hasRole('INSTRUCTOR') or hasRole('ADMIN')")
@@ -38,7 +43,7 @@ public class LessonController {
 
     @GetMapping("/modules/{moduleId}/lessons")
     @Operation(summary = "Get lessons for a module")
-    public ResponseEntity<ApiResponse<java.util.List<Lesson>>> getLessons(@PathVariable UUID moduleId) {
+    public ResponseEntity<ApiResponse<List<Lesson>>> getLessons(@PathVariable UUID moduleId) {
         return ResponseEntity.ok(ApiResponse.success(lessonService.getLessonsForModule(moduleId)));
     }
 
@@ -54,22 +59,18 @@ public class LessonController {
 
     @PostMapping("/lessons/{id}/confirm-upload")
     @PreAuthorize("hasRole('INSTRUCTOR') or hasRole('ADMIN')")
-    @Operation(summary = "Confirm content uploaded to MinIO")
+    @Operation(summary = "Confirm content uploaded and store durable object key")
     public ResponseEntity<ApiResponse<Lesson>> confirmUpload(
             @PathVariable UUID id,
             @RequestParam String objectKey) {
         return ResponseEntity.ok(ApiResponse.success("Upload confirmed", lessonService.confirmUpload(id, objectKey)));
     }
 
-    @PostMapping("/lessons/{id}/complete")
-    @PreAuthorize("hasRole('STUDENT')")
-    @Operation(summary = "Mark lesson as completed by student")
-    public ResponseEntity<ApiResponse<Void>> completeLesson(
-            @PathVariable UUID id,
-            @AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
-        enrollmentService.completeLesson(studentId, id);
-        return ResponseEntity.ok(ApiResponse.success("Lesson completed", null));
+    @GetMapping("/lessons/{id}/content-url")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Get a fresh presigned download URL for lesson content")
+    public ResponseEntity<ApiResponse<Map<String, String>>> getContentUrl(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.success(lessonService.getContentUrl(id)));
     }
 
     @DeleteMapping("/lessons/{id}")

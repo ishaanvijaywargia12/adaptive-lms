@@ -6,6 +6,7 @@ import com.lms.module.ai.service.RagQueryService;
 import com.lms.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
@@ -32,6 +33,7 @@ public class RagDoubtConsumer {
     private final RagQueryService ragQueryService;
     private final KafkaProducerService kafkaProducerService;
 
+    @EventListener
     @KafkaListener(
             topics = "lms.rag.doubt.submitted",
             groupId = "lms-rag-query-group",

@@ -25,6 +25,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import com.lms.security.CurrentUserService;
 
 /**
  * REST controller exposing the RAG-based doubt resolution API.
@@ -48,6 +49,8 @@ import java.util.UUID;
 @Slf4j
 @Tag(name = "RAG Doubt Resolution", description = "AI-powered doubt resolution using vector semantic search")
 public class RagDoubtController {
+
+    private final CurrentUserService currentUserService;
 
     private final KafkaProducerService kafkaProducerService;
     private final RagCacheService ragCacheService;
@@ -78,7 +81,7 @@ public class RagDoubtController {
             @AuthenticationPrincipal Jwt jwt) {
 
         String tenantId  = TenantContext.getCurrentTenant();
-        UUID   studentId = UUID.fromString(jwt.getSubject());
+        UUID   studentId = currentUserService.resolveOrProvision(jwt).getId();
 
         log.info("[RAG-CTRL] Doubt submitted by studentId={} courseId={}", studentId, request.courseId());
 
@@ -139,7 +142,7 @@ public class RagDoubtController {
     @GetMapping("/doubts/my")
     @Operation(summary = "Get authenticated student's doubt history")
     public ResponseEntity<ApiResponse<List<DoubtSession>>> getMyDoubts(@AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success(
                 doubtSessionRepository.findByStudentIdOrderByCreatedAtDesc(studentId)
         ));

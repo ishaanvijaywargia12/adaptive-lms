@@ -73,7 +73,8 @@ public class CertificateService {
                 .orElseThrow(() -> new RuntimeException("Course not found"));
 
         UUID verificationCode = UUID.randomUUID();
-        String verificationUrl = baseUrl + "/verify/" + verificationCode;
+        // IMPORTANT: /public/verify/ must match CertificateController.verifyCertificate path
+        String verificationUrl = baseUrl + "/public/verify/" + verificationCode;
 
         try {
             // 1. Generate QR Code bytes
@@ -82,19 +83,22 @@ public class CertificateService {
             // 2. Generate PDF bytes
             byte[] pdfBytes = generatePdf(student, course, verificationCode, qrCodeBytes);
 
-            // 3. Upload to MinIO (with base64 fallback for local dev)
-            String pdfUrl = uploadToMinio(tenantId, studentId, courseId, "certificate.pdf",
+            // 3. Upload to MinIO — returns durable object key (NOT a presigned URL)
+            String pdfObjectKey = uploadToMinio(tenantId, studentId, courseId, "certificate.pdf",
                     pdfBytes, "application/pdf");
-            String qrUrl = uploadToMinio(tenantId, studentId, courseId, "qrcode.png",
+            String qrObjectKey = uploadToMinio(tenantId, studentId, courseId, "qrcode.png",
                     qrCodeBytes, "image/png");
 
             Certificate certificate = Certificate.builder()
                     .studentId(studentId)
                     .courseId(courseId)
                     .issuedAt(LocalDateTime.now())
-                    .certificateUrl(pdfUrl)
+                    .pdfObjectKey(pdfObjectKey)
+                    .qrObjectKey(qrObjectKey)
+                    // certificateUrl kept for legacy compatibility
+                    .certificateUrl(pdfObjectKey)
+                    .qrCodeUrl(qrObjectKey)
                     .verificationCode(verificationCode)
-                    .qrCodeUrl(qrUrl)
                     .valid(true)
                     .build();
 
@@ -113,13 +117,18 @@ public class CertificateService {
         }
     }
 
+    /**
+     * Uploads file to MinIO and returns the durable object key.
+     * Falls back to base64 data URL if MinIO is unavailable (e.g. local dev without MinIO).
+     */
     private String uploadToMinio(String tenantId, UUID studentId, UUID courseId,
                                   String filename, byte[] data, String contentType) {
         try {
             String objectKey = String.format("certificates/%s/%s/%s/%s",
                     tenantId, courseId, studentId, filename);
-            minioStorageService.uploadBytes("lms-content", objectKey, data, contentType);
-            return minioStorageService.getPresignedDownloadUrl("lms-content", objectKey);
+            minioStorageService.uploadBytes("lms-certificates", objectKey, data, contentType);
+            // Return the durable object key, NOT a presigned URL
+            return objectKey;
         } catch (Exception e) {
             log.warn("MinIO upload failed, using base64 fallback: {}", e.getMessage());
             // Return base64 data URL as fallback for local dev without MinIO

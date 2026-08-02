@@ -18,12 +18,15 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
+import com.lms.security.CurrentUserService;
 
 @RestController
 @RequestMapping("/api/courses")
 @RequiredArgsConstructor
 @Tag(name = "Courses", description = "Course management endpoints")
 public class CourseController {
+
+    private final CurrentUserService currentUserService;
 
     private final CourseService courseService;
 
@@ -33,7 +36,7 @@ public class CourseController {
     public ResponseEntity<ApiResponse<Course>> createCourse(
             @Valid @RequestBody CreateCourseRequest request,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID instructorId = UUID.fromString(jwt.getSubject());
+        UUID instructorId = currentUserService.resolveOrProvision(jwt).getId();
         Course course = courseService.createCourse(request, instructorId);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Course created", course));
     }
@@ -61,7 +64,7 @@ public class CourseController {
     @Operation(summary = "Get all courses created by the authenticated instructor")
     public ResponseEntity<ApiResponse<java.util.List<Course>>> getMyCourses(
             @AuthenticationPrincipal Jwt jwt) {
-        UUID instructorId = UUID.fromString(jwt.getSubject());
+        UUID instructorId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success(courseService.getCoursesByInstructor(instructorId)));
     }
 
@@ -72,7 +75,7 @@ public class CourseController {
             @PathVariable UUID id,
             @Valid @RequestBody UpdateCourseRequest request,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID userId = UUID.fromString(jwt.getSubject());
+        UUID userId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success("Course updated", courseService.updateCourse(id, request, userId)));
     }
 
@@ -82,7 +85,7 @@ public class CourseController {
     public ResponseEntity<ApiResponse<Course>> publishCourse(
             @PathVariable UUID id,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID instructorId = UUID.fromString(jwt.getSubject());
+        UUID instructorId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success("Course submitted for review", courseService.publishCourse(id, instructorId)));
     }
 

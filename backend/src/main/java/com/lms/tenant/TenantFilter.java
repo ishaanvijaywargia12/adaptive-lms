@@ -7,6 +7,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -14,10 +16,18 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 /**
- * Resolves the current tenant from the request's Host header subdomain.
- * e.g. demo.lms.com → TenantContext is set to "tenant_demo"
+ * Resolves the current tenant from the incoming HTTP request.
  *
- * Public endpoints (like /public/verify) use "public" schema.
+ * <p>Resolution order (first match wins):
+ * <ol>
+ *   <li>{@code X-Tenant-ID} header — slug value (e.g. "demo")</li>
+ *   <li>Host subdomain — e.g. {@code demo.lms.com} → slug "demo"</li>
+ *   <li>Environment variable {@code LMS_DEFAULT_TENANT} — for single-tenant demo deployments</li>
+ *   <li>Falls back to "public" schema (super-admin / unauthenticated)</li>
+ * </ol>
+ *
+ * <p>Tenant slug is looked up in {@code public.tenants.subdomain} to get the schema name.
+ * An inactive tenant resolves to a 403 error.
  */
 @Component
 @RequiredArgsConstructor
@@ -26,6 +36,13 @@ public class TenantFilter extends OncePerRequestFilter {
 
     private final TenantRepository tenantRepository;
 
+    /**
+     * Default tenant slug for single-tenant deployments.
+     * Set via {@code LMS_DEFAULT_TENANT} env var (or {@code lms.tenant.default-slug} property).
+     */
+    @Value("${lms.tenant.default-slug:}")
+    private String defaultTenantSlug;
+
     @Override
     protected void doFilterInternal(
             @NonNull HttpServletRequest request,
@@ -33,44 +50,64 @@ public class TenantFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain) throws ServletException, IOException {
 
         try {
-            String subdomain = extractSubdomain(request);
+            String slug = resolveSlug(request);
 
-            if (subdomain == null || subdomain.isBlank()) {
-                // Shared / super-admin context
+            if (slug == null || slug.isBlank()) {
+                // No tenant context — use public schema (super-admin / Actuator / Swagger)
                 TenantContext.setCurrentTenant("public");
             } else {
-                String schemaName = tenantRepository.findSchemaBySubdomain(subdomain)
-                        .orElseThrow(() -> new TenantNotFoundException(subdomain));
-                TenantContext.setCurrentTenant(schemaName);
+                Tenant tenant = tenantRepository.findBySubdomain(slug)
+                        .orElseThrow(() -> new TenantNotFoundException("Tenant not found for slug: " + slug));
+
+                if (!tenant.isActive()) {
+                    log.warn("[TENANT] Request for inactive tenant slug='{}'", slug);
+                    response.sendError(HttpServletResponse.SC_FORBIDDEN, "Tenant is inactive");
+                    return;
+                }
+
+                TenantContext.setCurrentTenant(tenant.getSchemaName());
+                log.debug("[TENANT] Resolved slug='{}' → schema='{}'", slug, tenant.getSchemaName());
             }
 
-            // Set MDC for structured logging
-            org.slf4j.MDC.put("tenantId", TenantContext.getCurrentTenant());
-
+            MDC.put("tenantId", TenantContext.getCurrentTenant());
             filterChain.doFilter(request, response);
 
+        } catch (TenantNotFoundException e) {
+            log.warn("[TENANT] {}", e.getMessage());
+            response.sendError(HttpServletResponse.SC_NOT_FOUND, e.getMessage());
         } finally {
             TenantContext.clear();
-            org.slf4j.MDC.remove("tenantId");
-            org.slf4j.MDC.remove("userId");
+            MDC.remove("tenantId");
+            MDC.remove("userId");
         }
     }
 
-    private String extractSubdomain(HttpServletRequest request) {
-        // Check explicit header first (set by Nginx for subdomain routing)
-        String tenantHeader = request.getHeader("X-Tenant-ID");
-        if (tenantHeader != null && !tenantHeader.isBlank()) {
-            return tenantHeader;
+    /**
+     * Extracts the tenant slug from the request.
+     * Slug is the short identifier (e.g. "demo"), NOT the full subdomain.
+     */
+    private String resolveSlug(HttpServletRequest request) {
+        // 1. Explicit header (set by frontend, Nginx, or API gateway)
+        String header = request.getHeader("X-Tenant-ID");
+        if (header != null && !header.isBlank()) {
+            return header.trim().toLowerCase();
         }
 
-        // Fall back to Host header parsing
-        String host = request.getServerName(); // e.g. demo.lms.com
-        if (host == null) return null;
-
-        String[] parts = host.split("\\.");
-        if (parts.length >= 3) {
-            return parts[0]; // subdomain
+        // 2. Subdomain from Host header
+        String host = request.getServerName();
+        if (host != null) {
+            String[] parts = host.split("\\.");
+            if (parts.length >= 3) {
+                // host = "demo.lms.com" → slug = "demo"
+                return parts[0].toLowerCase();
+            }
         }
+
+        // 3. Default tenant for single-tenant/demo deployments
+        if (defaultTenantSlug != null && !defaultTenantSlug.isBlank()) {
+            return defaultTenantSlug.toLowerCase();
+        }
+
         return null;
     }
 }

@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
+import com.lms.security.CurrentUserService;
 
 @RestController
 @RequestMapping("/api/notifications")
@@ -21,13 +22,15 @@ import java.util.UUID;
 @Tag(name = "Notifications", description = "In-app notifications")
 public class NotificationController {
 
+    private final CurrentUserService currentUserService;
+
     private final NotificationService notificationService;
 
     @GetMapping
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Get all notifications")
     public ResponseEntity<ApiResponse<List<Notification>>> getAll(@AuthenticationPrincipal Jwt jwt) {
-        UUID userId = UUID.fromString(jwt.getSubject());
+        UUID userId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success(notificationService.getAll(userId)));
     }
 
@@ -35,7 +38,7 @@ public class NotificationController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Get unread notifications")
     public ResponseEntity<ApiResponse<List<Notification>>> getUnread(@AuthenticationPrincipal Jwt jwt) {
-        UUID userId = UUID.fromString(jwt.getSubject());
+        UUID userId = currentUserService.resolveOrProvision(jwt).getId();
         return ResponseEntity.ok(ApiResponse.success(notificationService.getUnread(userId)));
     }
 
@@ -45,7 +48,7 @@ public class NotificationController {
     public ResponseEntity<ApiResponse<Void>> markRead(
             @PathVariable UUID id,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID userId = UUID.fromString(jwt.getSubject());
+        UUID userId = currentUserService.resolveOrProvision(jwt).getId();
         notificationService.markRead(id, userId);
         return ResponseEntity.ok(ApiResponse.success("Marked as read", null));
     }
@@ -54,7 +57,7 @@ public class NotificationController {
     @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Mark all notifications as read")
     public ResponseEntity<ApiResponse<Void>> markAllRead(@AuthenticationPrincipal Jwt jwt) {
-        notificationService.markAllRead(UUID.fromString(jwt.getSubject()));
+        notificationService.markAllRead(currentUserService.resolveOrProvision(jwt).getId());
         return ResponseEntity.ok(ApiResponse.success("All notifications marked as read", null));
     }
 }

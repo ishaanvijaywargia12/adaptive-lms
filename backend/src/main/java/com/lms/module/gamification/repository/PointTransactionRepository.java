@@ -15,6 +15,8 @@ public interface PointTransactionRepository extends JpaRepository<PointTransacti
 
     boolean existsByStudentIdAndType(UUID studentId, String type);
 
+    boolean existsByIdempotencyKey(String idempotencyKey);
+
     @Query("SELECT p.studentId, SUM(p.points) as total FROM PointTransaction p GROUP BY p.studentId ORDER BY total DESC LIMIT :topN")
     List<Object[]> findTopStudentsByPoints(int topN);
 }

@@ -21,11 +21,14 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import com.lms.security.CurrentUserService;
 
 @RestController
 @RequiredArgsConstructor
 @Tag(name = "Live Sessions", description = "WebRTC live class management and WebSocket signaling")
 public class LiveSessionController {
+
+    private final CurrentUserService currentUserService;
 
     private final LiveSessionService liveSessionService;
     private final SimpMessagingTemplate messagingTemplate;
@@ -38,7 +41,7 @@ public class LiveSessionController {
     public ResponseEntity<ApiResponse<LiveSession>> scheduleSession(
             @Valid @RequestBody Map<String, Object> request,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID instructorId = UUID.fromString(jwt.getSubject());
+        UUID instructorId = currentUserService.resolveOrProvision(jwt).getId();
         LiveSession session = liveSessionService.schedule(request, instructorId);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success("Session scheduled", session));
     }
@@ -49,7 +52,7 @@ public class LiveSessionController {
     public ResponseEntity<ApiResponse<LiveSession>> startSession(
             @PathVariable UUID id,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID instructorId = UUID.fromString(jwt.getSubject());
+        UUID instructorId = currentUserService.resolveOrProvision(jwt).getId();
         LiveSession session = liveSessionService.startSession(id, instructorId);
         return ResponseEntity.ok(ApiResponse.success("Session started", session));
     }
@@ -60,7 +63,7 @@ public class LiveSessionController {
     public ResponseEntity<ApiResponse<LiveSession>> endSession(
             @PathVariable UUID id,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID instructorId = UUID.fromString(jwt.getSubject());
+        UUID instructorId = currentUserService.resolveOrProvision(jwt).getId();
         LiveSession session = liveSessionService.endSession(id, instructorId);
         return ResponseEntity.ok(ApiResponse.success("Session ended", session));
     }

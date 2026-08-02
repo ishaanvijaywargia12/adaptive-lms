@@ -2,8 +2,11 @@ import axios from "axios";
 import { getToken, refreshToken } from "./keycloak";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "/api",
-  headers: { "Content-Type": "application/json" },
+  baseURL: import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "/api",
+  headers: {
+    "Content-Type": "application/json",
+    "X-Tenant-ID": import.meta.env.VITE_TENANT_ID || "demo",
+  },
 });
 
 // Attach Keycloak JWT on every request
@@ -16,6 +19,10 @@ api.interceptors.request.use(async (config) => {
   const token = getToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // Ensure tenant header is always set
+  if (!config.headers["X-Tenant-ID"]) {
+    config.headers["X-Tenant-ID"] = import.meta.env.VITE_TENANT_ID || "demo";
   }
   return config;
 });

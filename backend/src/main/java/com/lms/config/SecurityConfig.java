@@ -33,6 +33,14 @@ public class SecurityConfig {
     @Value("${keycloak.auth-server-url}")
     private String keycloakUrl;
 
+    /**
+     * Comma-separated list of allowed CORS origins.
+     * Set CORS_ALLOWED_ORIGINS env var in production.
+     * Defaults to localhost (dev) + GitHub Pages (demo).
+     */
+    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:5173,https://ishaanvijaywargia12.github.io}")
+    private List<String> allowedOrigins;
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
@@ -60,9 +68,10 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("*"));
+        // Explicit origins (NOT wildcard) — required when allowCredentials=true
+        configuration.setAllowedOrigins(allowedOrigins);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("*"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Tenant-ID", "X-Requested-With"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
 

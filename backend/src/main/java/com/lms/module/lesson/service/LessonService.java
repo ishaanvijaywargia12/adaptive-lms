@@ -45,12 +45,29 @@ public class LessonService {
         return Map.of("uploadUrl", uploadUrl, "objectKey", objectName);
     }
 
+    /**
+     * Stores the durable object key (NOT a presigned URL) in {@code content_url}.
+     * Fresh download URLs are generated on demand via {@link #getContentUrl}.
+     */
     @Transactional
     public Lesson confirmUpload(UUID lessonId, String objectKey) {
         Lesson lesson = getLesson(lessonId);
-        String contentUrl = minioStorageService.getPresignedDownloadUrl("lms-content", objectKey);
-        lesson.setContentUrl(contentUrl);
+        // Store the durable key, not an expiring presigned URL
+        lesson.setContentUrl(objectKey);
         return lessonRepository.save(lesson);
+    }
+
+    /**
+     * Generates a fresh presigned download URL for a lesson's content.
+     * The URL is valid for 1 hour (configurable in MinIO).
+     */
+    public Map<String, String> getContentUrl(UUID lessonId) {
+        Lesson lesson = getLesson(lessonId);
+        if (lesson.getContentUrl() == null || lesson.getContentUrl().isBlank()) {
+            return Map.of("url", "", "available", "false");
+        }
+        String presignedUrl = minioStorageService.getPresignedDownloadUrl("lms-content", lesson.getContentUrl());
+        return Map.of("url", presignedUrl, "objectKey", lesson.getContentUrl(), "available", "true");
     }
 
     public Lesson getLesson(UUID lessonId) {

@@ -61,24 +61,34 @@ public class QuizService {
             Collections.shuffle(questions);
         }
 
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime deadline = quiz.getTimeLimitSeconds() > 0
+                ? now.plusSeconds(quiz.getTimeLimitSeconds())
+                : null;
+
         QuizAttempt attempt = QuizAttempt.builder()
                 .studentId(studentId)
                 .quizId(quizId)
-                .startedAt(LocalDateTime.now())
+                .startedAt(now)
+                .deadlineAt(deadline)
                 .attemptNumber((int) attemptCount + 1)
                 .build();
         attempt = quizAttemptRepository.save(attempt);
 
-        // Store timer in Redis if time-limited
+        // Store timer in Redis if time-limited (cache only)
         if (quiz.getTimeLimitSeconds() > 0) {
             String timerKey = "quiz:timer:" + attempt.getId();
-            redisTemplate.opsForValue().set(timerKey, quiz.getTimeLimitSeconds(),
-                    quiz.getTimeLimitSeconds(), TimeUnit.SECONDS);
+            try {
+                redisTemplate.opsForValue().set(timerKey, quiz.getTimeLimitSeconds(),
+                        quiz.getTimeLimitSeconds() + 10, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                log.warn("Failed to set Redis timer for quiz attempt {}: {}", attempt.getId(), e.getMessage());
+            }
         }
 
         // Build question DTOs with options (no correct answers!)
         List<QuestionDto> questionDtos = questions.stream()
-                .map(q -> toQuestionDto(q, false)) // false = don't include correct answers
+                .map(q -> toQuestionDto(q, false))
                 .collect(Collectors.toList());
 
         log.info("Quiz attempt started: quizId={} studentId={} attemptNumber={}",
@@ -109,17 +119,14 @@ public class QuizService {
             throw new BusinessLogicException("This attempt has already been submitted");
         }
 
-        // Check timer
-        String timerKey = "quiz:timer:" + attemptId;
+        // Server-authoritative timer check
+        if (attempt.getDeadlineAt() != null && LocalDateTime.now().isAfter(attempt.getDeadlineAt().plusSeconds(5))) {
+            throw new BusinessLogicException("Quiz time limit exceeded");
+        }
+
         final UUID quizId = attempt.getQuizId();
         Quiz quiz = quizRepository.findById(quizId)
                 .orElseThrow(() -> new ResourceNotFoundException("Quiz", quizId.toString()));
-
-        boolean timerExpired = quiz.getTimeLimitSeconds() > 0
-                && redisTemplate.opsForValue().get(timerKey) == null;
-        if (timerExpired) {
-            throw new BusinessLogicException("Quiz time limit exceeded");
-        }
 
         List<Question> questions = questionRepository.findByQuizIdOrderByOrderIndex(quizId);
         int totalPoints = 0;
@@ -138,13 +145,11 @@ public class QuizService {
             String correctAnswer = null;
 
             if (question.getQuestionType() == Question.QuestionType.SHORT_ANSWER) {
-                // Short answer: non-empty is accepted (instructor must review manually in full impl)
                 isCorrect = answer != null && !answer.isBlank();
                 selectedAnswer = answer;
                 if (isCorrect) pointsEarned = question.getPoints();
 
             } else {
-                // MCQ / TRUE_FALSE — look up selected option
                 List<Option> options = optionRepository.findByQuestionId(question.getId());
                 Option correctOption = options.stream().filter(Option::isCorrect).findFirst().orElse(null);
                 correctAnswer = correctOption != null ? correctOption.getOptionText() : "—";
@@ -186,7 +191,7 @@ public class QuizService {
                     .correct(isCorrect)
                     .selectedAnswer(selectedAnswer)
                     .correctAnswer(correctAnswer)
-                    .explanation(question.getExplanation()) // Only revealed after submission
+                    .explanation(question.getExplanation())
                     .pointsEarned(pointsEarned)
                     .totalPoints(question.getPoints())
                     .build());
@@ -204,10 +209,12 @@ public class QuizService {
         attempt.setCompletedAt(LocalDateTime.now());
         quizAttemptRepository.save(attempt);
 
-        // Clean up timer
-        redisTemplate.delete(timerKey);
+        // Clean up Redis timer if present
+        try {
+            redisTemplate.delete("quiz:timer:" + attemptId);
+        } catch (Exception ignored) {}
 
-        // Publish Kafka events
+        // Publish events
         String tenantId = TenantContext.getCurrentTenant();
         if (passed) {
             kafkaProducer.publishQuizPassed(new BaseEvent.QuizPassedEvent(
@@ -256,7 +263,6 @@ public class QuizService {
                 .map(o -> OptionDto.builder()
                         .id(o.getId())
                         .optionText(o.getOptionText())
-                        // isCorrect is NEVER included in OptionDto — it's safely excluded by design
                         .build())
                 .collect(Collectors.toList());
 

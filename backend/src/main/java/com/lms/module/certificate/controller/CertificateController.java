@@ -20,11 +20,14 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import com.lms.security.CurrentUserService;
 
 @RestController
 @RequiredArgsConstructor
 @Tag(name = "Certificates", description = "Certificate generation and verification")
 public class CertificateController {
+
+    private final CurrentUserService currentUserService;
 
     private final CertificateService certificateService;
     private final CourseRepository courseRepository;
@@ -35,7 +38,7 @@ public class CertificateController {
     @Operation(summary = "Get my certificates with course info")
     public ResponseEntity<ApiResponse<List<CertificateDto>>> getMyCertificates(
             @AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         List<Certificate> certs = certificateService.getStudentCertificates(studentId);
         List<CertificateDto> dtos = certs.stream()
                 .map(c -> toDto(c, studentId))

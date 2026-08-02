@@ -31,6 +31,10 @@ public class QuizAttempt extends BaseEntity {
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 
+    /** Server-authoritative deadline for timed quizzes. */
+    @Column(name = "deadline_at")
+    private LocalDateTime deadlineAt;
+
     @Column(name = "attempt_number", nullable = false)
     private int attemptNumber = 1;
 }

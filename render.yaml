@@ -1,13 +1,16 @@
-# render.yaml — Render.com service definitions (free tier)
+# render.yaml — Render.com service definitions (100% Free Tier)
 # Docs: https://render.com/docs/blueprint-spec
 #
-# Deploy this by:
-# 1. Push this repo to GitHub (already done)
-# 2. Go to https://dashboard.render.com/
-# 3. New → Blueprint → Connect this repo → Render auto-reads this file
+# Deploy steps:
+# 1. Push repo to GitHub (already done: https://github.com/ishaanvijaywargia12/adaptive-lms)
+# 2. Go to https://dashboard.render.com/ → New → Blueprint → Connect this repo
+# 3. Fill in the prompt environment variables (Neon PostgreSQL connection string)
 #
-# All services use Render's FREE tier (no credit card required).
-# Note: Free tier services spin down after 15 min idle, cold start ~30 seconds.
+# Free Tier Specs:
+# - Oregon region
+# - Spring Boot backend running in Docker
+# - Programmatic Flyway auto-initializes schema on startup
+# - LMS_EVENTS_MODE=sync (in-process events — no Kafka required)
 
 services:
   # ─── Spring Boot Backend ──────────────────────────────────────────────────────
@@ -17,84 +20,46 @@ services:
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     plan: free
-    region: oregon  # Closest to Asia for low latency
+    region: oregon
     branch: main
     healthCheckPath: /actuator/health
 
     envVars:
       - key: SPRING_PROFILES_ACTIVE
-        value: render
+        value: demo
 
-      # ── PostgreSQL (Neon.tech free tier) ──────────────────────────────────────
-      # After creating your Neon project, copy the connection string here
+      # ── PostgreSQL (Neon.tech free tier string) ──────────────────────────────
       - key: SPRING_DATASOURCE_URL
-        sync: false  # Set manually in Render dashboard
+        sync: false  # Paste your Neon JDBC URL e.g. jdbc:postgresql://ep-xxx.neon.tech/neondb?sslmode=require
       - key: SPRING_DATASOURCE_USERNAME
-        sync: false
+        sync: false  # Neon username
       - key: SPRING_DATASOURCE_PASSWORD
-        sync: false
+        sync: false  # Neon password
 
-      # ── Redis (Upstash free tier) ─────────────────────────────────────────────
-      # From https://console.upstash.com → Redis → Create → Copy the Jedis URL
-      - key: SPRING_DATA_REDIS_URL
-        sync: false
+      # ── Event Mode (sync = in-process, zero Kafka dependency) ────────────────
+      - key: LMS_EVENTS_MODE
+        value: sync
 
-      # ── Kafka (Upstash Kafka free tier) ──────────────────────────────────────
-      # From https://console.upstash.com → Kafka → Create → Copy bootstrap URL
-      - key: SPRING_KAFKA_BOOTSTRAP_SERVERS
-        sync: false
-      - key: SPRING_KAFKA_PROPERTIES_SASL_JAAS_CONFIG
-        sync: false  # "org.apache.kafka.common.security.scram.ScramLoginModule required username='...' password='...';"
-      - key: SPRING_KAFKA_SECURITY_PROTOCOL
-        value: SASL_SSL
-      - key: SPRING_KAFKA_PROPERTIES_SASL_MECHANISM
-        value: SCRAM-SHA-256
+      - key: LMS_DEFAULT_TENANT
+        value: demo
 
-      # ── Keycloak ─────────────────────────────────────────────────────────────
-      # Will be the URL of the lms-keycloak service below once deployed
-      - key: KEYCLOAK_AUTH_SERVER_URL
-        sync: false
+      # ── Qdrant Cloud (Free Tier — 1GB cluster at cloud.qdrant.io) ────────────
+      - key: QDRANT_HOST
+        sync: false  # e.g. xxx-xxx.us-east-4-0.aws.cloud.qdrant.io
+      - key: QDRANT_PORT
+        value: "6334"
+      - key: QDRANT_API_KEY
+        sync: false  # API key from Qdrant Cloud dashboard
+      - key: QDRANT_USE_TLS
+        value: "true"
 
-      # ── CORS — allow GitHub Pages frontend ───────────────────────────────────
-      - key: APP_CORS_ORIGINS
-        sync: false  # e.g. https://ishaanvijaywargia12.github.io
+      # ── Gemini AI Key ────────────────────────────────────────────────────────
+      - key: GEMINI_API_KEY
+        sync: false  # Gemini API Key
 
-      # ── Misc ─────────────────────────────────────────────────────────────────
+      # ── CORS ──────────────────────────────────────────────────────────────────
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://ishaanvijaywargia12.github.io,http://localhost:3000,http://localhost:5173"
+
       - key: APP_BASE_URL
         sync: false  # e.g. https://adaptive-lms-backend.onrender.com
-      - key: OPENAI_API_KEY
-        sync: false  # Optional — only needed for AI Doubts feature
-
-  # ─── Keycloak Auth Server ─────────────────────────────────────────────────────
-  - type: web
-    name: adaptive-lms-keycloak
-    runtime: docker
-    dockerCommand: start-dev --import-realm --http-port=10000
-    image:
-      url: quay.io/keycloak/keycloak:23.0
-    plan: free
-    region: oregon
-    # Keycloak on free tier: ~512MB RAM, enough for dev/demo
-    # It uses the same Neon PostgreSQL DB but with schema=keycloak
-
-    envVars:
-      - key: KC_DB
-        value: postgres
-      - key: KC_DB_URL
-        sync: false  # Same Neon connection string as backend
-      - key: KC_DB_USERNAME
-        sync: false
-      - key: KC_DB_PASSWORD
-        sync: false
-      - key: KC_DB_SCHEMA
-        value: keycloak
-      - key: KEYCLOAK_ADMIN
-        value: admin
-      - key: KEYCLOAK_ADMIN_PASSWORD
-        sync: false
-      - key: KC_HOSTNAME_STRICT
-        value: "false"
-      - key: KC_HTTP_ENABLED
-        value: "true"
-      - key: PORT
-        value: "10000"  # Render assigns a PORT env var, Keycloak must listen on it

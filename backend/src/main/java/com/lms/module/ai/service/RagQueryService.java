@@ -1,13 +1,14 @@
 package com.lms.module.ai.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lms.kafka.event.BaseEvent;
 import com.lms.kafka.event.RagDoubtSubmittedEvent;
 import com.lms.kafka.producer.KafkaProducerService;
 import com.lms.module.ai.dto.StructuredDoubtAnswer;
-import com.lms.module.ai.entity.DoubtSession;
 import com.lms.module.ai.entity.DoubtStatus;
 import com.lms.module.ai.repository.DoubtSessionRepository;
 import com.lms.module.ai.repository.QdrantVectorRepository;
+import com.lms.module.ai.repository.QdrantVectorRepository.VectorChunkResult;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -20,21 +21,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Core RAG (Retrieval-Augmented Generation) orchestrator.
- * <p>
- * Processes a {@link RagDoubtSubmittedEvent} through the full pipeline:
- * <ol>
- *   <li>Embed the student's question via OpenAI text-embedding-ada-002</li>
- *   <li>Retrieve top-K semantically relevant chunks from Qdrant
- *       (strictly filtered by tenantId + courseId)</li>
- *   <li>Inject retrieved context into a structured system prompt</li>
- *   <li>Generate a structured answer via gpt-4o-mini (LangChain4j)</li>
- *   <li>Cache the answer in Redis for 24 h (SHA-256 keyed)</li>
- *   <li>Persist the answer in PostgreSQL {@code doubt_sessions}</li>
- *   <li>Notify the student via the existing Kafka notification pipeline</li>
- * </ol>
  */
 @Service
 @RequiredArgsConstructor
@@ -44,7 +34,6 @@ public class RagQueryService {
     @Value("${rag.top-k:5}")
     private int topK;
 
-    // ─── System prompt injected as the LLM context frame ──────────────────────
     private static final String SYSTEM_PROMPT_TEMPLATE = """
             You are an expert teaching assistant for an online learning platform.
             Your role is to help students understand their course material clearly and accurately.
@@ -69,27 +58,19 @@ public class RagQueryService {
     private final RagCacheService ragCacheService;
     private final DoubtSessionRepository doubtSessionRepository;
     private final KafkaProducerService kafkaProducerService;
+    private final ObjectMapper objectMapper;
 
-    // ─── Public API ───────────────────────────────────────────────────────────
-
-    /**
-     * Executes the full RAG pipeline for a submitted student doubt.
-     * Called asynchronously by {@code RagDoubtConsumer}.
-     *
-     * @param event The Kafka event carrying sessionId, studentId, courseId, questionText
-     */
     @Transactional
     public void resolveDoubt(RagDoubtSubmittedEvent event) {
         log.info("[RAG] Resolving doubt sessionId={} tenantId={} courseId={}",
                 event.getSessionId(), event.getTenantId(), event.getCourseId());
 
         try {
-            // Step 1: Embed the question
+            // Step 1: Embed the question (384-dim AllMiniLmL6V2)
             Embedding questionEmbedding = embeddingModel.embed(event.getQuestionText()).content();
-            log.debug("[RAG] Question embedded ({} dims)", questionEmbedding.vectorAsList().size());
 
-            // Step 2: Retrieve top-K chunks from Qdrant (tenant + course isolated)
-            List<String> retrievedChunks = qdrantVectorRepository.searchTopK(
+            // Step 2: Retrieve top-K chunks from Qdrant with source details
+            List<VectorChunkResult> retrievedChunks = qdrantVectorRepository.searchTopKWithDetails(
                     event.getTenantId(),
                     event.getCourseId(),
                     questionEmbedding.vectorAsList(),
@@ -103,31 +84,35 @@ public class RagQueryService {
                 StructuredDoubtAnswer fallback = StructuredDoubtAnswer.noContext();
                 fallback.setSessionId(event.getSessionId());
                 fallback.setQuestionText(event.getQuestionText());
-                persistAndNotify(event, fallback);
+                persistAndNotify(event, fallback, List.of());
                 return;
             }
 
             // Step 4: Build numbered context block for the prompt
             StringBuilder contextBuilder = new StringBuilder();
             for (int i = 0; i < retrievedChunks.size(); i++) {
-                contextBuilder.append("[Excerpt ").append(i + 1).append("]\n")
-                        .append(retrievedChunks.get(i))
+                VectorChunkResult chunk = retrievedChunks.get(i);
+                contextBuilder.append("[Excerpt ").append(i + 1).append(" (Source: ").append(chunk.getObjectKey()).append(")]\n")
+                        .append(chunk.getText())
                         .append("\n\n");
             }
             String systemPrompt = String.format(SYSTEM_PROMPT_TEMPLATE, contextBuilder);
             String fullPrompt   = systemPrompt + "\nStudent Question: " + event.getQuestionText();
 
-            // Step 5: LLM generation via LangChain4j → gpt-4o-mini
-            log.debug("[RAG] Calling LLM for sessionId={} (context {} chars)", event.getSessionId(), fullPrompt.length());
+            // Step 5: LLM generation via Gemini Flash
+            log.debug("[RAG] Calling LLM for sessionId={}", event.getSessionId());
             String rawAnswer = chatLanguageModel.generate(fullPrompt);
-            log.debug("[RAG] LLM responded for sessionId={}", event.getSessionId());
 
-            // Step 6: Build the structured answer object
+            List<String> chunkTexts = retrievedChunks.stream()
+                    .map(VectorChunkResult::getText)
+                    .collect(Collectors.toList());
+
+            // Step 6: Build structured answer
             StructuredDoubtAnswer answer = StructuredDoubtAnswer.builder()
                     .sessionId(event.getSessionId())
                     .questionText(event.getQuestionText())
                     .answer(rawAnswer)
-                    .sourceChunks(retrievedChunks)
+                    .sourceChunks(chunkTexts)
                     .resolvedAt(LocalDateTime.now())
                     .build();
 
@@ -135,27 +120,28 @@ public class RagQueryService {
             ragCacheService.put(event.getTenantId(), event.getCourseId(), event.getQuestionText(), answer);
 
             // Steps 8 & 9: Persist + Notify
-            persistAndNotify(event, answer);
+            persistAndNotify(event, answer, retrievedChunks);
 
         } catch (Exception ex) {
             log.error("[RAG] Pipeline failed for sessionId={}: {}", event.getSessionId(), ex.getMessage(), ex);
-            markSessionFailed(event.getSessionId());
+            markSessionFailed(event.getSessionId(), ex.getMessage());
         }
     }
 
-    // ─── Helpers ─────────────────────────────────────────────────────────────
-
-    private void persistAndNotify(RagDoubtSubmittedEvent event, StructuredDoubtAnswer answer) {
-        // Persist answer to PostgreSQL
+    private void persistAndNotify(RagDoubtSubmittedEvent event, StructuredDoubtAnswer answer, List<VectorChunkResult> sources) {
         doubtSessionRepository.findById(event.getSessionId()).ifPresent(session -> {
             session.setAnswerText(answer.getAnswer());
+            try {
+                session.setSourcesJson(objectMapper.writeValueAsString(sources));
+            } catch (Exception e) {
+                log.warn("[RAG] Could not serialize sources for sessionId={}", event.getSessionId());
+            }
             session.setStatus(DoubtStatus.RESOLVED);
             session.setResolvedAt(answer.getResolvedAt());
             doubtSessionRepository.save(session);
             log.info("[RAG] Session {} marked RESOLVED", event.getSessionId());
         });
 
-        // Push notification to student via existing pipeline
         kafkaProducerService.publishNotification(
                 new BaseEvent.NotificationSendEvent(
                         UUID.randomUUID().toString(),
@@ -163,16 +149,17 @@ public class RagQueryService {
                         LocalDateTime.now(),
                         event.getStudentId(),
                         "Your doubt has been resolved! 🤖",
-                        "AI has answered your question about this course. Tap to view the answer.",
+                        "AI has answered your question about this course.",
                         "RAG_ANSWER",
                         "{\"sessionId\":\"" + event.getSessionId() + "\"}"
                 )
         );
     }
 
-    private void markSessionFailed(UUID sessionId) {
+    private void markSessionFailed(UUID sessionId, String error) {
         doubtSessionRepository.findById(sessionId).ifPresent(session -> {
             session.setStatus(DoubtStatus.FAILED);
+            session.setErrorMessage(error);
             doubtSessionRepository.save(session);
         });
     }

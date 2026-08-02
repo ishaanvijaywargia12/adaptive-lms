@@ -14,12 +14,15 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
+import com.lms.security.CurrentUserService;
 
 @RestController
 @RequestMapping("/api/my/recommendations")
 @RequiredArgsConstructor
 @Tag(name = "AI Recommendations", description = "AI-driven course recommendation endpoints")
 public class RecommendationController {
+
+    private final CurrentUserService currentUserService;
 
     private final RecommendationService recommendationService;
 
@@ -28,7 +31,7 @@ public class RecommendationController {
     @Operation(summary = "Get course recommendations for the authenticated student")
     public ResponseEntity<ApiResponse<List<AiRecommendation>>> getMyRecommendations(
             @AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         List<AiRecommendation> recommendations = recommendationService.getRecommendations(studentId);
         return ResponseEntity.ok(ApiResponse.success("Recommendations fetched", recommendations));
     }
@@ -39,7 +42,7 @@ public class RecommendationController {
     public ResponseEntity<ApiResponse<Void>> dismissRecommendation(
             @PathVariable UUID recommendationId,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID studentId = UUID.fromString(jwt.getSubject());
+        UUID studentId = currentUserService.resolveOrProvision(jwt).getId();
         recommendationService.dismiss(recommendationId, studentId);
         return ResponseEntity.ok(ApiResponse.success("Recommendation dismissed", null));
     }

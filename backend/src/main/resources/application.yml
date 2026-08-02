@@ -19,7 +19,9 @@ spring:
   # ─── JPA ──────────────────────────────────────────────────────────────────
   jpa:
     hibernate:
-      ddl-auto: update
+      # validate: Hibernate checks schema matches entities but does NOT alter tables.
+      # Flyway (via FlywayMigrationRunner) is the sole authority for schema changes.
+      ddl-auto: validate
     show-sql: false
     properties:
       hibernate:
@@ -30,7 +32,9 @@ spring:
 
   # ─── Flyway ───────────────────────────────────────────────────────────────
   flyway:
-    enabled: false  # We manage Flyway programmatically per-tenant
+    # Disabled: FlywayMigrationRunner handles migrations programmatically
+    # per-schema (public + each tenant schema). Do NOT enable Spring auto-run.
+    enabled: false
 
   # ─── Redis ────────────────────────────────────────────────────────────────
   data:
@@ -138,6 +142,8 @@ gemini:
 qdrant:
   host: ${QDRANT_HOST:localhost}
   port: ${QDRANT_PORT:6334}       # gRPC port (REST is 6333 — only used for health checks)
+  api-key: ${QDRANT_API_KEY:}     # Required for Qdrant Cloud; empty for local
+  use-tls: ${QDRANT_USE_TLS:false} # true for Qdrant Cloud, false for local Docker
   collection:
     vector-size: 384             # AllMiniLmL6V2 output dimensionality (384 dims)
 
@@ -147,6 +153,16 @@ rag:
   chunk-overlap: 200             # Overlap between adjacent chunks
   top-k: 5                       # Top-K Qdrant results injected as LLM context
   cache-ttl-hours: 24            # Redis answer cache TTL
+
+# ─── LMS App Settings ────────────────────────────────────────────────────
+lms:
+  events:
+    # mode: 'kafka' (default) or 'sync' (demo/test — in-process, no Kafka)
+    mode: ${LMS_EVENTS_MODE:kafka}
+  tenant:
+    # Default tenant slug for single-tenant demo deployments
+    # (used when no X-Tenant-ID header and no subdomain found)
+    default-slug: ${LMS_DEFAULT_TENANT:}
 
 # ─── App Config ──────────────────────────────────────────────────────────
 app:

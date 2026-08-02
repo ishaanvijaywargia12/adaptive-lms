@@ -66,8 +66,8 @@ jobs:
           distribution: "temurin"
           cache: "maven"
 
-      - name: Compile & package (skip tests — integration tests need live infra)
-        run: mvn -B clean package -DskipTests -q
+      - name: Compile & run unit tests
+        run: mvn -B clean test -q
 
       - name: Report any compiler warnings
         run: mvn -B compile 2>&1 | grep -i "warning:" || echo "No compiler warnings"

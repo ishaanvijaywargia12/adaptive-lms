@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 
 @Component
 @RequiredArgsConstructor
@@ -40,8 +41,7 @@ public class LmsScheduler {
                 TenantContext.setCurrentTenant(tenant.getSchemaName());
                 LocalDate yesterday = LocalDate.now().minusDays(1);
 
-                List<Streak> expiredStreaks = streakRepository
-                        .findByLastActivityDateBefore(yesterday);
+                List<Streak> expiredStreaks = streakRepository.findByLastActivityDateBefore(yesterday);
 
                 for (Streak streak : expiredStreaks) {
                     if (streak.getCurrentStreak() > 0) {
@@ -82,21 +82,20 @@ public class LmsScheduler {
     // ─── Weekly Leaderboard Reset: every Monday at midnight ──────────────────
     @Scheduled(cron = "0 0 0 * * MON")
     public void resetWeeklyLeaderboard() {
-        log.info("Resetting weekly leaderboards");
+        log.info("Resetting weekly leaderboards across all active tenants");
         tenantRepository.findAll().stream().filter(Tenant::isActive).forEach(tenant -> {
-            String weeklyKey = "leaderboard:" + tenant.getSchemaName() + ":global:WEEKLY";
-            redisTemplate.delete(weeklyKey);
+            try {
+                // Delete both global and course-scoped weekly leaderboards
+                String pattern = "leaderboard:" + tenant.getSchemaName() + ":*:WEEKLY";
+                Set<String> keys = redisTemplate.keys(pattern);
+                if (keys != null && !keys.isEmpty()) {
+                    redisTemplate.delete(keys);
+                    log.info("Deleted {} weekly leaderboard keys for tenant {}", keys.size(), tenant.getSchemaName());
+                }
+            } catch (Exception e) {
+                log.warn("Failed to reset weekly leaderboards for tenant {}: {}", tenant.getSchemaName(), e.getMessage());
+            }
         });
         log.info("Weekly leaderboard reset complete");
-    }
-
-    // ─── Stale Enrollment Nudge: daily at 9am ────────────────────────────────
-    @Scheduled(cron = "0 0 9 * * *")
-    @Transactional
-    public void sendStaleEnrollmentNudges() {
-        log.info("Checking for stale enrollments (no activity in 30 days)");
-        // TODO: Query enrollments WHERE last_accessed_at < NOW() - 30 days AND completed_at IS NULL
-        // For each: send email nudge via Spring Mail
-        // Implemented as a placeholder here; triggers Spring Batch job in full build
     }
 }

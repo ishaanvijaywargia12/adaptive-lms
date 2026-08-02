@@ -22,4 +22,11 @@ public class PointTransaction extends BaseEntity {
 
     @Column(name = "reference_id")
     private UUID referenceId;
+
+    /**
+     * Optional unique key to prevent duplicate point awards on event replay.
+     * Maps to {@code point_transactions.idempotency_key UNIQUE} in the DB.
+     */
+    @Column(name = "idempotency_key", unique = true)
+    private String idempotencyKey;
 }

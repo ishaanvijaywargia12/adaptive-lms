@@ -7,77 +7,101 @@ import com.lms.tenant.TenantContext;
 import com.lms.tenant.TenantRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.CommandLineRunner;
-import org.springframework.context.annotation.Profile;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
-import java.util.UUID;
-
+/**
+ * Seeds default tenant and admin user for demo/dev environments.
+ *
+ * <p>Runs at startup, AFTER {@link FlywayMigrationRunner} (Order=2 vs Order=1).
+ * Idempotent — skips if tenant/user already exist.
+ *
+ * <p>In production, tenants are created through the admin API, not seeded.
+ */
 @Component
-@Profile("!test")
 @RequiredArgsConstructor
 @Slf4j
-public class DataSeeder implements CommandLineRunner {
+public class DataSeeder {
 
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
+    private final FlywayMigrationRunner flywayMigrationRunner;
 
-    @Override
+    @Value("${lms.tenant.default-slug:demo}")
+    private String defaultTenantSlug;
+
+    @Value("${lms.demo.admin-email:admin@lms.demo}")
+    private String adminEmail;
+
+    @Value("${lms.demo.admin-keycloak-id:demo-admin-id}")
+    private String adminKeycloakId;
+
+    @EventListener(ApplicationReadyEvent.class)
+    @Order(2)
     @Transactional
-    public void run(String... args) {
-        log.info("Starting database seeding process...");
-        seedTenants();
-        log.info("Database seeding completed.");
+    public void seed() {
+        log.info("[SEEDER] Starting idempotent seed...");
+        Tenant tenant = seedDemoTenant();
+        if (tenant != null) {
+            seedDemoAdmin(tenant);
+        }
+        log.info("[SEEDER] Seed complete.");
     }
 
-    private void seedTenants() {
-        if (tenantRepository.count() > 0) {
-            log.info("Tenants already exist. Skipping tenant seeding.");
-            return;
+    private Tenant seedDemoTenant() {
+        if (tenantRepository.existsBySubdomain(defaultTenantSlug)) {
+            log.info("[SEEDER] Tenant '{}' already exists. Skipping.", defaultTenantSlug);
+            return tenantRepository.findBySubdomain(defaultTenantSlug).orElse(null);
         }
 
-        Tenant techCorp = Tenant.builder()
-                .id(UUID.randomUUID())
-                .name("TechCorp")
-                .subdomain("techcorp.lms.local")
+        String schemaName = "tenant_" + defaultTenantSlug;
+
+        Tenant tenant = Tenant.builder()
+                .name("Demo LMS")
+                .subdomain(defaultTenantSlug)          // slug only — e.g. "demo", not "demo.lms.local"
                 .realmName("lms-demo")
-                .schemaName("tenant_techcorp")
+                .schemaName(schemaName)
                 .active(true)
-                .createdAt(LocalDateTime.now())
                 .build();
 
-        Tenant medSchool = Tenant.builder()
-                .id(UUID.randomUUID())
-                .name("MedSchool")
-                .subdomain("medschool.lms.local")
-                .realmName("lms-demo")
-                .schemaName("tenant_medschool")
-                .active(true)
-                .createdAt(LocalDateTime.now())
-                .build();
+        tenantRepository.save(tenant);
+        log.info("[SEEDER] Created tenant subdomain='{}' schema='{}'", defaultTenantSlug, schemaName);
 
-        tenantRepository.save(techCorp);
-        tenantRepository.save(medSchool);
-
-        log.info("Seeded tenants: TechCorp and MedSchool.");
-
-        // We would also ideally trigger Flyway/Hibernate schema generation for these schemas here
-        // and seed dummy users/instructors using TenantContext in a real setting.
+        // Run V2 migrations for this new tenant schema
         try {
-            TenantContext.setCurrentTenant(techCorp.getSchemaName());
-            User student1 = User.builder()
-                    .keycloakId(UUID.randomUUID().toString())
-                    .email("student1@techcorp.com")
-                    .firstName("Tech")
-                    .lastName("Student")
-                    .role(User.UserRole.STUDENT)
-                    .build();
-            userRepository.save(student1);
-            log.info("Seeded dummy student for TechCorp.");
+            flywayMigrationRunner.migrateTenantSchema(schemaName);
         } catch (Exception e) {
-            log.warn("Could not seed users inside tenant schema (schema might not be initialized yet): {}", e.getMessage());
+            log.error("[SEEDER] Failed to migrate tenant schema '{}': {}", schemaName, e.getMessage());
+        }
+
+        return tenant;
+    }
+
+    private void seedDemoAdmin(Tenant tenant) {
+        TenantContext.setCurrentTenant(tenant.getSchemaName());
+        try {
+            if (userRepository.existsByEmail(adminEmail)) {
+                log.info("[SEEDER] Admin user '{}' already exists. Skipping.", adminEmail);
+                return;
+            }
+
+            User admin = User.builder()
+                    .keycloakId(adminKeycloakId)
+                    .email(adminEmail)
+                    .firstName("LMS")
+                    .lastName("Admin")
+                    .role(User.UserRole.ADMIN)
+                    .active(true)
+                    .build();
+
+            userRepository.save(admin);
+            log.info("[SEEDER] Created demo admin user email='{}'", adminEmail);
+        } catch (Exception e) {
+            log.warn("[SEEDER] Could not seed admin user: {}", e.getMessage());
         } finally {
             TenantContext.clear();
         }

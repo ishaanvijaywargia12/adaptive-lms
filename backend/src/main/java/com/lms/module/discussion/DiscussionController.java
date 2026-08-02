@@ -14,12 +14,15 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
+import com.lms.security.CurrentUserService;
 
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
 @Tag(name = "Discussions", description = "Lesson discussion forums")
 public class DiscussionController {
+
+    private final CurrentUserService currentUserService;
 
     private final DiscussionThreadRepository threadRepository;
 
@@ -40,7 +43,7 @@ public class DiscussionController {
             @PathVariable UUID lessonId,
             @RequestBody CreateThreadRequest request,
             @AuthenticationPrincipal Jwt jwt) {
-        UUID authorId = UUID.fromString(jwt.getSubject());
+        UUID authorId = currentUserService.resolveOrProvision(jwt).getId();
         DiscussionThread thread = DiscussionThread.builder()
                 .lessonId(lessonId)
                 .authorId(authorId)
