@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { initKeycloak, isAuthenticated, getProfile, hasRole, login } from "../lib/keycloak";
+import { getUser, login, userManager } from "../lib/auth";
 
 interface AuthUser {
   id: string;
@@ -28,25 +28,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [authenticated, setAuthenticated] = useState(false);
 
   useEffect(() => {
-    initKeycloak().then((auth) => {
-      setAuthenticated(auth);
-      if (auth) {
-        const profile = getProfile() as Record<string, unknown>;
-        const roles: string[] = (
-          (profile?.realm_access as { roles?: string[] })?.roles ?? []
-        );
-        setUser({
-          id: profile?.sub as string,
-          email: profile?.email as string,
-          name: `${profile?.given_name ?? ""} ${profile?.family_name ?? ""}`.trim(),
-          roles,
-          isStudent: roles.includes("STUDENT"),
-          isInstructor: roles.includes("INSTRUCTOR"),
-          isAdmin: roles.includes("ADMIN"),
-        });
-      }
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    const loadUser = () => {
+      getUser().then((oidcUser) => {
+        const auth = !!(oidcUser && !oidcUser.expired);
+        setAuthenticated(auth);
+        if (auth && oidcUser) {
+          const profile = oidcUser.profile;
+          const roles: string[] = (profile.roles as string[]) || [];
+          setUser({
+            id: profile.sub,
+            email: profile.email as string,
+            name: `${profile.given_name ?? ""} ${profile.family_name ?? ""}`.trim(),
+            roles,
+            isStudent: roles.includes("STUDENT"),
+            isInstructor: roles.includes("INSTRUCTOR"),
+            isAdmin: roles.includes("ADMIN"),
+          });
+        } else {
+          setUser(null);
+        }
+        setLoading(false);
+      }).catch(() => setLoading(false));
+    };
+
+    loadUser();
+
+    // Subscribe to auth state changes
+    userManager.events.addUserLoaded(loadUser);
+    userManager.events.addUserUnloaded(loadUser);
+    
+    return () => {
+      userManager.events.removeUserLoaded(loadUser);
+      userManager.events.removeUserUnloaded(loadUser);
+    };
   }, []);
 
   return (

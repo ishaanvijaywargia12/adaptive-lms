@@ -1,9 +1,12 @@
 <!doctype html>
 <html>
-<head><title></title></head>
+<head><title>Silent SSO Check</title></head>
 <body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/oidc-client-ts/3.0.1/browser/oidc-client-ts.min.js"></script>
 <script>
-  parent.postMessage(location.href, location.origin);
+    if (window.oidc) {
+        new window.oidc.UserManager({}).signinSilentCallback().catch(console.error);
+    }
 </script>
 </body>
 </html>

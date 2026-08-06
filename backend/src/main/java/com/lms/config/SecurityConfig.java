@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -52,25 +53,37 @@ public class SecurityConfig {
     @Order(2)
     public SecurityFilterChain apiFilterChain(HttpSecurity http) throws Exception {
         http
+            .securityMatcher("/api/**", "/public/**", "/actuator/**", "/swagger-ui/**", "/api-docs/**")
             .csrf(AbstractHttpConfigurer::disable)
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                // Auth server own endpoints (covered by Order-1 chain, but permit here too)
-                .requestMatchers("/oauth2/**", "/login", "/logout", "/.well-known/**").permitAll()
-                // Public API endpoints
                 .requestMatchers("/public/**").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info", "/actuator/metrics").permitAll()
                 .requestMatchers("/swagger-ui/**", "/api-docs/**", "/swagger-ui.html").permitAll()
                 .requestMatchers("/api/search/courses", "/api/search/autocomplete").permitAll()
-                // All other requests require a valid JWT
                 .anyRequest().authenticated()
             )
             .oauth2ResourceServer(oauth2 -> oauth2
                 .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
             )
             .addFilterBefore(tenantFilter, UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+
+    @Bean
+    @Order(3)
+    public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(AbstractHttpConfigurer::disable) // Simplify for demo/login
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/error").permitAll()
+                .anyRequest().authenticated()
+            )
+            // Use standard Spring Security form login for browser sessions
+            .formLogin(Customizer.withDefaults());
 
         return http.build();
     }

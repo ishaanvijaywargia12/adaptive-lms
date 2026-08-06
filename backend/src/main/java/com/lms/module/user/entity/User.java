@@ -31,6 +31,10 @@ public class User extends BaseEntity {
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
+    /** BCrypt-encoded password. Null for SSO-only users. */
+    @Column(name = "password_hash")
+    private String passwordHash;
+
     public enum UserRole {
         STUDENT, INSTRUCTOR, ADMIN, SUPER_ADMIN
     }

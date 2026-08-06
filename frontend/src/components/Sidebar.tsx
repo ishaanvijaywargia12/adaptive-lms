@@ -7,7 +7,7 @@ import {
   Users, Settings, ShieldAlert, Brain, ClipboardCheck
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
-import { logout } from "../lib/keycloak";
+import { logout } from "../lib/auth";
 
 type NavItem = { icon: React.ElementType, label: string, to: string };
 type NavGroup = { title: string, items: NavItem[] };

@@ -44,12 +44,15 @@ public class DemoUserDetailsService implements UserDetailsService {
             if (!tenant.isActive()) continue;
             TenantContext.setCurrentTenant(tenant.getSchemaName());
             try {
-                var optUser = userRepository.findByEmail(username);
+                    var optUser = userRepository.findByEmail(username);
                 if (optUser.isPresent()) {
                     User user = optUser.get();
                     log.debug("[AUTH] Found user {} in tenant {}", username, tenant.getSchemaName());
-                    // Demo users: no stored password — use Demo1234! as the seeded credential
-                    String encoded = passwordEncoder.encode(DEMO_DEFAULT_PASSWORD);
+                    // Use stored BCrypt hash if available; fall back to demo password for migrated rows
+                    String storedHash = user.getPasswordHash();
+                    String encoded = (storedHash != null && !storedHash.isBlank())
+                            ? storedHash
+                            : passwordEncoder.encode(DEMO_DEFAULT_PASSWORD);
                     return new DemoUserPrincipal(
                             user.getEmail(),
                             encoded,

@@ -42,6 +42,15 @@ public class DataSeeder implements InitializingBean {
     @Value("${lms.tenant.default-slug:demo}")
     private String defaultTenantSlug;
 
+    @Value("${lms.seed.admin-password:Demo1234!}")
+    private String adminPassword;
+
+    @Value("${lms.seed.instructor-password:Demo1234!}")
+    private String instructorPassword;
+
+    @Value("${lms.seed.student-password:Demo1234!}")
+    private String studentPassword;
+
     @Override
     public void afterPropertiesSet() {
         log.info("[SEEDER] Starting idempotent seed...");
@@ -89,13 +98,13 @@ public class DataSeeder implements InitializingBean {
     private void seedDemoUsers(Tenant tenant) {
         String schemaName = tenant.getSchemaName();
 
-        seedUser(schemaName, "student@demo.com",    "Demo",  "Student",    User.UserRole.STUDENT);
-        seedUser(schemaName, "instructor@demo.com", "Demo",  "Instructor", User.UserRole.INSTRUCTOR);
-        seedUser(schemaName, "admin@demo.com",      "LMS",   "Admin",      User.UserRole.ADMIN);
+        seedUser(schemaName, "student@demo.com",    "Demo",  "Student",    User.UserRole.STUDENT, studentPassword);
+        seedUser(schemaName, "instructor@demo.com", "Demo",  "Instructor", User.UserRole.INSTRUCTOR, instructorPassword);
+        seedUser(schemaName, "admin@demo.com",      "LMS",   "Admin",      User.UserRole.ADMIN, adminPassword);
     }
 
     private void seedUser(String schemaName, String email,
-                          String firstName, String lastName, User.UserRole role) {
+                          String firstName, String lastName, User.UserRole role, String rawPassword) {
         TenantContext.setCurrentTenant(schemaName);
         try {
             transactionTemplate.execute(status -> {
@@ -106,6 +115,8 @@ public class DataSeeder implements InitializingBean {
 
                 // keycloakId is intentionally null — it is filled on first login
                 // by CurrentUserService.resolveOrProvision().
+                // BCrypt-encode the provided password so Spring Auth Server can authenticate.
+                String passwordHash = new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder().encode(rawPassword);
                 User user = User.builder()
                         .keycloakId(null)
                         .email(email)
@@ -113,6 +124,7 @@ public class DataSeeder implements InitializingBean {
                         .lastName(lastName)
                         .role(role)
                         .active(true)
+                        .passwordHash(passwordHash)
                         .build();
 
                 userRepository.save(user);

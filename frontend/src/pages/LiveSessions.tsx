@@ -9,7 +9,7 @@ import api from "../lib/api";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import { useAuth } from "../contexts/AuthContext";
-import { getToken } from "../lib/keycloak";
+import { getToken } from "../lib/auth";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 

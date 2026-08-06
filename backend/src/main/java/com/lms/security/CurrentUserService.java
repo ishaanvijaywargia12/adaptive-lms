@@ -34,14 +34,26 @@ public class CurrentUserService {
      */
     @Transactional
     public User resolveOrProvision(Jwt jwt) {
-        String keycloakId = jwt.getSubject();
+        String subjectId = jwt.getSubject();
 
-        return userRepository.findByKeycloakId(keycloakId)
+        return userRepository.findByKeycloakId(subjectId)
                 .orElseGet(() -> {
-                    log.info("[AUTH] First login for keycloakId={}. Provisioning app user.", keycloakId);
-
-                    // Extract claims — Keycloak populates these in the token
+                    // Extract claims
                     String email = jwt.getClaimAsString("email");
+                    if (email == null) {
+                        email = subjectId + "@unknown.invalid";
+                    }
+
+                    // Fallback to lookup by email (for seeded users or migrated users)
+                    var existingUser = userRepository.findByEmail(email);
+                    if (existingUser.isPresent()) {
+                        User user = existingUser.get();
+                        log.info("[AUTH] Linking existing user email={} to subjectId={}", email, subjectId);
+                        user.setKeycloakId(subjectId);
+                        return userRepository.save(user);
+                    }
+
+                    log.info("[AUTH] First login for subjectId={}. Provisioning app user.", subjectId);
                     String firstName = firstOrFallback(jwt.getClaimAsString("given_name"),
                             jwt.getClaimAsString("preferred_username"), "User");
                     String lastName = firstOrFallback(jwt.getClaimAsString("family_name"), "");
@@ -50,8 +62,8 @@ public class CurrentUserService {
                     User.UserRole role = resolveRole(jwt);
 
                     User user = User.builder()
-                            .keycloakId(keycloakId)
-                            .email(email != null ? email : keycloakId + "@unknown.invalid")
+                            .keycloakId(subjectId)
+                            .email(email)
                             .firstName(firstName)
                             .lastName(lastName)
                             .role(role)

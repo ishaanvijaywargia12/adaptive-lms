@@ -36,11 +36,12 @@ public class AuthController {
     }
 
     @PostMapping("/change-password")
-    @Operation(summary = "Change password via Keycloak")
+    @Operation(summary = "Change password")
     public ResponseEntity<ApiResponse<Void>> changePassword(
             @RequestBody ChangePasswordRequest request,
             @AuthenticationPrincipal Jwt jwt) {
-        authService.changePassword(jwt.getSubject(), request.newPassword());
+        String email = jwt.getClaimAsString("email");
+        authService.changePassword(email != null ? email : jwt.getSubject(), request.newPassword());
         return ResponseEntity.ok(ApiResponse.success("Password changed successfully", null));
     }
 

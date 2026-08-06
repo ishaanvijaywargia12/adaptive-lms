@@ -67,3 +67,11 @@ services:
 
       - key: APP_BASE_URL
         sync: false  # e.g. https://adaptive-lms-backend.onrender.com
+
+      # ── Spring Authorization Server RSA Keys ──────────────────────────────────
+      # Base64-encoded PKCS#8 private key and X.509 public key for JWT signing.
+      # Must be set to persist tokens across restarts.
+      - key: APP_JWT_PRIVATE_KEY
+        sync: false
+      - key: APP_JWT_PUBLIC_KEY
+        sync: false

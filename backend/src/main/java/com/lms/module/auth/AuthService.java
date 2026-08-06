@@ -1,14 +1,16 @@
 package com.lms.module.auth;
 
-
+import com.lms.module.user.entity.User;
+import com.lms.module.user.repository.UserRepository;
+import com.lms.security.CurrentUserService;
+import com.lms.tenant.TenantContext;
+import com.lms.tenant.TenantRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.keycloak.admin.client.Keycloak;
-import org.keycloak.admin.client.KeycloakBuilder;
-import org.keycloak.representations.idm.CredentialRepresentation;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
 import java.util.List;
@@ -19,20 +21,10 @@ import java.util.Map;
 @Slf4j
 public class AuthService {
 
-    @Value("${keycloak.auth-server-url}")
-    private String keycloakUrl;
-
-    @Value("${keycloak.admin.username}")
-    private String adminUsername;
-
-    @Value("${keycloak.admin.password}")
-    private String adminPassword;
-
-    @Value("${keycloak.admin.client-id}")
-    private String adminClientId;
-
-    @Value("${keycloak.admin.realm}")
-    private String adminRealm;
+    private final UserRepository userRepository;
+    private final TenantRepository tenantRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final org.springframework.transaction.support.TransactionTemplate transactionTemplate;
 
     public Map<String, Object> getCurrentUserProfile(Jwt jwt) {
         Map<String, Object> profile = new HashMap<>();
@@ -40,9 +32,9 @@ public class AuthService {
         profile.put("email", jwt.getClaim("email"));
         profile.put("firstName", jwt.getClaim("given_name"));
         profile.put("lastName", jwt.getClaim("family_name"));
-        profile.put("username", jwt.getClaim("preferred_username"));
+        profile.put("username", jwt.getClaim("email"));
 
-        // Extract roles from realm_access
+        // Extract roles from realm_access (as set by jwtCustomizer in AuthServerConfig)
         Map<String, Object> realmAccess = jwt.getClaim("realm_access");
         if (realmAccess != null) {
             profile.put("roles", realmAccess.get("roles"));
@@ -53,8 +45,6 @@ public class AuthService {
     }
 
     public Map<String, Object> updateProfile(Jwt jwt, Map<String, String> updates) {
-        // In a production system, this would call Keycloak Admin API to update the user
-        // For now, return the updated profile merged with JWT claims
         Map<String, Object> profile = getCurrentUserProfile(jwt);
         if (updates.containsKey("firstName")) profile.put("firstName", updates.get("firstName"));
         if (updates.containsKey("lastName")) profile.put("lastName", updates.get("lastName"));
@@ -62,42 +52,42 @@ public class AuthService {
         return profile;
     }
 
-    public void changePassword(String userId, String newPassword) {
-        try {
-            Keycloak keycloak = buildAdminKeycloak();
-            // Get tenant realm from thread context - default to 'lms-demo' for now
-            String realm = "lms-demo";
-            CredentialRepresentation credential = new CredentialRepresentation();
-            credential.setType(CredentialRepresentation.PASSWORD);
-            credential.setValue(newPassword);
-            credential.setTemporary(false);
-            keycloak.realm(realm).users().get(userId).resetPassword(credential);
-            log.info("Password changed for user {}", userId);
-        } catch (Exception e) {
-            log.error("Failed to change password for user {}: {}", userId, e.getMessage());
-            throw new RuntimeException("Password change failed: " + e.getMessage());
+    /**
+     * Changes the user's password by updating the BCrypt hash in the DB.
+     * The Spring Authorization Server reads passwords from DemoUserDetailsService,
+     * which loads passwordHash from this table.
+     */
+    public void changePassword(String userEmail, String newPassword) {
+        // Find user across all active tenants
+        for (var tenant : tenantRepository.findAll()) {
+            if (!tenant.isActive()) continue;
+            TenantContext.setCurrentTenant(tenant.getSchemaName());
+            try {
+                var optUser = userRepository.findByEmail(userEmail);
+                if (optUser.isPresent()) {
+                    transactionTemplate.execute(status -> {
+                        User user = optUser.get();
+                        user.setPasswordHash(passwordEncoder.encode(newPassword));
+                        userRepository.save(user);
+                        return null;
+                    });
+                    log.info("[AUTH] Password changed for user {}", userEmail);
+                    return;
+                }
+            } finally {
+                TenantContext.clear();
+            }
         }
+        throw new RuntimeException("User not found: " + userEmail);
     }
 
+    /**
+     * Logout is stateless — the client discards the JWT.
+     * For true revocation a token denylist (Redis) would be needed.
+     */
     public void logout(String userId) {
-        try {
-            Keycloak keycloak = buildAdminKeycloak();
-            String realm = "lms-demo";
-            keycloak.realm(realm).users().get(userId).logout();
-            log.info("User {} logged out", userId);
-        } catch (Exception e) {
-            log.warn("Failed to invalidate Keycloak session for user {}: {}", userId, e.getMessage());
-            // Best-effort logout — don't fail the request
-        }
-    }
-
-    private Keycloak buildAdminKeycloak() {
-        return KeycloakBuilder.builder()
-                .serverUrl(keycloakUrl)
-                .realm(adminRealm)
-                .clientId(adminClientId)
-                .username(adminUsername)
-                .password(adminPassword)
-                .build();
+        log.info("[AUTH] Logout recorded for subject {}", userId);
+        // Stateless — JWT expiry is the revocation mechanism.
+        // Extend this with Redis denylist if needed.
     }
 }

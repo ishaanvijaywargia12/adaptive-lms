@@ -7,7 +7,8 @@ import { Loader2 } from "lucide-react";
 
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import Sidebar from "./components/Sidebar";
-import { login } from "./lib/keycloak";
+import { login } from "./lib/auth";
+import Callback from "./pages/Callback";
 
 // Lazy-loaded pages
 const Dashboard = React.lazy(() => import("./pages/Dashboard"));
@@ -194,6 +195,7 @@ export default function App() {
             }}
           />
           <Routes>
+            <Route path="/callback" element={<Callback />} />
             <Route path="/*" element={<ProtectedRoutes />} />
           </Routes>
         </BrowserRouter>

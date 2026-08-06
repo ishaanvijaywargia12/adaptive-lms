@@ -189,12 +189,7 @@
             <version>${tika.version}</version>
         </dependency>
 
-        <!-- ═══ Keycloak Admin Client ═════════════════════════════════════════ -->
-        <dependency>
-            <groupId>org.keycloak</groupId>
-            <artifactId>keycloak-admin-client</artifactId>
-            <version>${keycloak.version}</version>
-        </dependency>
+
 
         <!-- ═══ Resilience4j ═════════════════════════════════════════════════ -->
         <dependency>
@@ -348,6 +343,14 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.1.2</version>
+                <configuration>
+                    <argLine>-XX:+EnableDynamicAgentLoading</argLine>
                 </configuration>
             </plugin>
         </plugins>

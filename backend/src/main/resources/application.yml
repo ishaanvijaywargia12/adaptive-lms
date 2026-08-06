@@ -125,14 +125,14 @@ minio:
     submissions: lms-submissions
     certificates: lms-certificates
 
-# ─── Keycloak Admin ──────────────────────────────────────────────────────────
-keycloak:
-  auth-server-url: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:8180}
-  admin:
-    username: ${KEYCLOAK_ADMIN_USERNAME:admin}
-    password: ${KEYCLOAK_ADMIN_PASSWORD:admin123}
-    client-id: admin-cli
-    realm: master
+# ─── Keycloak Admin (dev only — not used in demo/prod) ──────────────────────
+# keycloak:
+#   auth-server-url: http://localhost:8180
+#   admin:
+#     username: admin
+#     password: admin123
+#     client-id: admin-cli
+#     realm: master
 
 # ─── Gemini / LangChain4j ────────────────────────────────────────────────────
 gemini:
@@ -170,6 +170,9 @@ app:
   plagiarism-threshold: ${APP_PLAGIARISM_THRESHOLD:70}
   mail:
     from: ${MAIL_FROM:noreply@lms.com}
+  jwt:
+    private-key: ${APP_JWT_PRIVATE_KEY:}
+    public-key: ${APP_JWT_PUBLIC_KEY:}
   file-limits:
     video-max-mb: 500
     pdf-max-mb: 20

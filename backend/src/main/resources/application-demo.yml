@@ -71,22 +71,21 @@ lms:
   tenant:
     default-slug: ${LMS_DEFAULT_TENANT:demo}
 
-# ─── App ─────────────────────────────────────────────────────────────────────
+# ─── JWT Signing Keys (persistent — survives Render restarts) ──────────────
+# Generate once with: openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048
+# Store the full PEM (including headers) as a single-line env var with \n escaped.
 app:
   base-url: ${APP_BASE_URL}
   mail:
     from: ${MAIL_FROM:noreply@lms.demo}
+  jwt:
+    private-key: ${APP_JWT_PRIVATE_KEY:}
+    public-key: ${APP_JWT_PUBLIC_KEY:}
 
 # ─── CORS ──────────────────────────────────────────────────────────────────
 cors:
   allowed-origins: >
     ${CORS_ALLOWED_ORIGINS:https://ishaanvijaywargia12.github.io,http://localhost:5173,http://localhost:3000}
-
-# ─── Auth (Spring Authorization Server — self-hosted JWT issuer) ────────────
-# The backend itself issues JWTs at ${APP_BASE_URL}/oauth2/token
-# No external Keycloak instance required.
-keycloak:
-  auth-server-url: ${APP_BASE_URL}   # Points to self for compatibility
 
 # ─── MinIO / Object Storage ────────────────────────────────────────────────
 minio:

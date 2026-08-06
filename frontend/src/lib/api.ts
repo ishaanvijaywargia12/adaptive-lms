@@ -1,5 +1,5 @@
 import axios from "axios";
-import { getToken, refreshToken } from "./keycloak";
+import { getToken } from "./auth";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "/api",
@@ -9,14 +9,9 @@ const api = axios.create({
   },
 });
 
-// Attach Keycloak JWT on every request
+// Attach JWT on every request
 api.interceptors.request.use(async (config) => {
-  try {
-    await refreshToken();
-  } catch {
-    // token refresh failed — user will be redirected to login by 401 handler
-  }
-  const token = getToken();
+  const token = await getToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -32,7 +27,7 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      import("./keycloak").then(({ login }) => login());
+      import("./auth").then(({ login }) => login());
     }
     return Promise.reject(err);
   }
